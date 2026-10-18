@@ -9,6 +9,15 @@ void main() {
       expect(Formatters.score(null), '—');
     });
 
+    test('clockTime uses a 12-hour clock', () {
+      final evening = Formatters.clockTime(DateTime(2026, 10, 18, 20, 5));
+      final morning = Formatters.clockTime(DateTime(2026, 10, 18, 0, 30));
+      expect(evening, contains('8:05'));
+      expect(evening, contains('PM'));
+      expect(morning, contains('12:30'));
+      expect(morning, contains('AM'));
+    });
+
     test('compactNumber abbreviates large values', () {
       expect(Formatters.compactNumber(999), '999');
       expect(Formatters.compactNumber(1500), '2K');

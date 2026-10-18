@@ -273,7 +273,7 @@ class EntryRow extends ConsumerWidget {
           vertical: Tokens.space8,
         ),
         child: Padding(
-          padding: const EdgeInsets.all(Tokens.space12),
+          padding: const EdgeInsets.all(Tokens.space16),
           child: Row(
             children: [
               ClipRRect(

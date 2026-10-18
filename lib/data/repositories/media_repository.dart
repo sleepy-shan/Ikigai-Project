@@ -86,6 +86,9 @@ class MediaRepository {
   final Duration cacheTtl;
   final Map<String, _CacheEntry<dynamic>> _cache = {};
 
+  /// Maximum number of cached responses.
+  static const int _maxCacheEntries = 120;
+
   T? _get<T>(String key) {
     final entry = _cache[key];
     if (entry == null) return null;
@@ -94,13 +97,26 @@ class MediaRepository {
       return null;
     }
     final Object? value = entry.value as Object?;
-    if (value is T) return value;
-    return null;
+    if (value is! T) return null;
+    // Re-insert so this key becomes the most recently used: Dart maps keep
+    // insertion order, so the first key is always the least recently used.
+    _cache
+      ..remove(key)
+      ..[key] = entry;
+    return value;
   }
 
   void _put(String key, Object value) {
-    // Bound the cache so long sessions cannot grow it without limit.
-    if (_cache.length >= 120) _cache.remove(_cache.keys.first);
+    _cache.remove(key);
+    if (_cache.length >= _maxCacheEntries) {
+      // Expired entries go first (they would never be served anyway)...
+      final now = DateTime.now();
+      _cache.removeWhere((_, entry) => now.difference(entry.time) > cacheTtl);
+      // ...then evict the least recently used until there is room.
+      while (_cache.length >= _maxCacheEntries) {
+        _cache.remove(_cache.keys.first);
+      }
+    }
     _cache[key] = _CacheEntry(value, DateTime.now());
   }
 
@@ -178,15 +194,56 @@ class MediaRepository {
     return media;
   }
 
-  /// Airing schedule between [from] and [to] (epoch seconds).
+  /// AniList caps a page at 50 items.
+  static const int _maxPerPage = 50;
+
+  /// Safety cap on pages fetched for one schedule window (50 each).
+  static const int _maxSchedulePages = 24;
+
+  /// One page of the airing schedule between [from] and [to] (epoch seconds).
+  ///
+  /// A busy week has far more than one page of episodes; use
+  /// [airingScheduleAll] when the whole window is needed.
   Future<List<AiringScheduleItem>> airingSchedule({
     required int from,
     required int to,
     int page = 1,
-    int perPage = 50,
+    int perPage = _maxPerPage,
+  }) async => (await _airingPage(from, to, page, perPage)).items;
+
+  /// Every episode airing between [from] and [to] (epoch seconds).
+  ///
+  /// Follows `pageInfo.hasNextPage` until the window is exhausted (bounded by
+  /// [_maxSchedulePages]), so the calendar shows the whole week and "airing
+  /// today" shows every episode instead of the first 24 or 50. Individual
+  /// pages are cached, so a retry after a mid-way failure (for example a rate
+  /// limit on page 8) resumes from the cache instead of starting over.
+  Future<List<AiringScheduleItem>> airingScheduleAll({
+    required int from,
+    required int to,
   }) async {
+    final seen = <int>{};
+    final all = <AiringScheduleItem>[];
+    for (var page = 1; page <= _maxSchedulePages; page++) {
+      final result = await _airingPage(from, to, page, _maxPerPage);
+      for (final item in result.items) {
+        // Pages can shift if the schedule changes between requests.
+        if (seen.add(item.id)) all.add(item);
+      }
+      if (!result.hasNextPage) break;
+    }
+    all.sort((a, b) => a.airingAt.compareTo(b.airingAt));
+    return List.unmodifiable(all);
+  }
+
+  Future<_AiringPage> _airingPage(
+    int from,
+    int to,
+    int page,
+    int perPage,
+  ) async {
     final key = 'airing:$from:$to:$page:$perPage';
-    final cached = _get<List<AiringScheduleItem>>(key);
+    final cached = _get<_AiringPage>(key);
     if (cached != null) return cached;
     final data = await _client.query(kAiringScheduleQuery, {
       'page': page,
@@ -194,14 +251,57 @@ class MediaRepository {
       'airingAt_greater': from,
       'airingAt_lesser': to,
     });
-    final pageJson = data['Page'];
-    final mapped = pageJson is Map<String, dynamic>
-        ? pageJson
-        : Map<String, dynamic>.from(pageJson as Map);
-    final result = AniListMapper.airingSchedule(mapped['airingSchedules']);
+    final pageJson = _pageMap(data['Page']);
+    final result = _AiringPage(
+      items: AniListMapper.airingSchedule(pageJson['airingSchedules']),
+      hasNextPage: AniListMapper.pageInfo(pageJson, page).hasNextPage,
+    );
     _put(key, result);
     return result;
   }
+
+  /// Safety cap on pages fetched for one week of manga releases.
+  static const int _maxMangaPages = 4;
+
+  /// Manga whose start date falls in `[from, to)` (local calendar days).
+  ///
+  /// The window is applied by AniList (`startDate_greater` / `startDate_lesser`),
+  /// so every week returns its own titles. The result is popularity-ordered
+  /// and capped at [_maxMangaPages] pages; callers group it by day.
+  Future<List<Media>> mangaReleases({
+    required DateTime from,
+    required DateTime to,
+  }) async {
+    // Both bounds are exclusive FuzzyDateInts (YYYYMMDD), so the lower bound
+    // is the day *before* [from].
+    final dayBefore = DateTime(from.year, from.month, from.day - 1);
+    final greater = _fuzzyInt(dayBefore);
+    final lesser = _fuzzyInt(to);
+    final seen = <int>{};
+    final all = <Media>[];
+    for (var page = 1; page <= _maxMangaPages; page++) {
+      final key = 'mangaReleases:$greater:$lesser:$page';
+      var result = _get<MediaPage>(key);
+      if (result == null) {
+        final data = await _client.query(kMangaReleasesQuery, {
+          'page': page,
+          'perPage': _maxPerPage,
+          'startDate_greater': greater,
+          'startDate_lesser': lesser,
+        });
+        result = _page(data, page);
+        _put(key, result);
+      }
+      for (final media in result.items) {
+        if (seen.add(media.id)) all.add(media);
+      }
+      if (!result.hasNextPage) break;
+    }
+    return List.unmodifiable(all);
+  }
+
+  static int _fuzzyInt(DateTime date) =>
+      date.year * 10000 + date.month * 100 + date.day;
 
   String _browseKey(BrowseQuery q) =>
       'browse:${q.type.name}:${q.sort.name}:${q.search.trim().toLowerCase()}'
@@ -385,26 +485,78 @@ class MediaRepository {
     return AniListMapper.activities(data['Page']);
   }
 
+  /// Upstream page size and depth used to assemble one staff member's credits.
+  static const int _staffUpstreamPages = 3;
+
   /// Staff profile plus one page of the titles they worked on.
+  ///
+  /// AniList exposes credits as two independent connections (`characterMedia`
+  /// for voice roles, `staffMedia` for production roles) that share one `page`
+  /// argument and are each sorted on their own. Paging them in lock-step and
+  /// merging per page made page 2 repeat or reorder page 1 and reported a next
+  /// page when only one connection had more. Instead the connections are
+  /// fetched to a fixed depth, merged, de-duplicated and sorted **once**, and
+  /// the app's pages are slices of that single ordered list.
   Future<PersonWorks> staffWorks(
     int id, {
     int page = 1,
     int perPage = 18,
   }) async {
-    final key = 'staffWorks:$id:$page:$perPage';
+    final all = await _allStaffWorks(id);
+    final items = all.works.items;
+    final safePage = page < 1 ? 1 : page;
+    final start = (safePage - 1) * perPage;
+    final end = start + perPage;
+    return PersonWorks(
+      person: all.person,
+      works: MediaPage(
+        items: start >= items.length
+            ? const []
+            : items.sublist(start, end < items.length ? end : items.length),
+        page: safePage,
+        hasNextPage: end < items.length,
+      ),
+    );
+  }
+
+  Future<PersonWorks> _allStaffWorks(int id) async {
+    final key = 'staffAll:$id';
     final cached = _get<PersonWorks>(key);
     if (cached != null) return cached;
-    final data = await _client.query(kStaffWorksQuery, {
-      'id': id,
-      'page': page,
-      'perPage': perPage,
-    });
-    final result = AniListMapper.staffWorks(data['Staff'], page);
-    if (result == null) {
-      throw AppException(ErrorKind.notFound, 'Staff $id is unavailable');
+
+    PersonProfile? profile;
+    final seen = <int>{};
+    final items = <Media>[];
+    for (var upstream = 1; upstream <= _staffUpstreamPages; upstream++) {
+      final data = await _client.query(kStaffWorksQuery, {
+        'id': id,
+        'page': upstream,
+        'perPage': _maxPerPage,
+      });
+      final result = AniListMapper.staffWorks(data['Staff'], upstream);
+      if (result == null) {
+        if (upstream == 1) {
+          throw AppException(ErrorKind.notFound, 'Staff $id is unavailable');
+        }
+        break;
+      }
+      profile ??= result.person;
+      for (final media in result.works.items) {
+        if (seen.add(media.id)) items.add(media);
+      }
+      // `hasNextPage` is true while either connection has more.
+      if (!result.works.hasNextPage) break;
     }
-    _put(key, result);
-    return result;
+    items.sort((a, b) {
+      final byPopularity = (b.popularity ?? 0).compareTo(a.popularity ?? 0);
+      return byPopularity != 0 ? byPopularity : a.id.compareTo(b.id);
+    });
+    final all = PersonWorks(
+      person: profile!,
+      works: MediaPage(items: List.unmodifiable(items), page: 1, hasNextPage: false),
+    );
+    _put(key, all);
+    return all;
   }
 
   /// Character profile plus one page of the series they appear in.
@@ -454,6 +606,14 @@ class MediaRepository {
       hasNextPage: info['hasNextPage'] == true,
     );
   }
+}
+
+/// One cached page of the airing schedule.
+class _AiringPage {
+  const _AiringPage({required this.items, required this.hasNextPage});
+
+  final List<AiringScheduleItem> items;
+  final bool hasNextPage;
 }
 
 class _CacheEntry<T> {

@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 
 import '../../core/theme/app_scroll.dart';
 import '../../core/theme/design_tokens.dart';
@@ -20,9 +19,6 @@ import '../components/app_footer.dart';
 import '../components/section_header.dart';
 import '../components/state_views.dart';
 import '../router/app_router.dart';
-
-/// Time-of-day label for today's airing episodes (e.g. "20:00").
-final _airingTimeFormat = DateFormat('HH:mm');
 
 /// Dashboard: type toggle + spotlight carousel + continue rail + rails.
 ///
@@ -865,7 +861,8 @@ class _AiringTodaySection extends ConsumerWidget {
             ArrowRail(
               height: _airingStripHeight,
               itemCount: items.length,
-              itemExtent: _airingCardWidth + 12,
+              separatorWidth: Tokens.railGap,
+              itemExtent: _airingCardWidth + Tokens.railGap,
               itemBuilder: (context, index) => SizedBox(
                 width: _airingCardWidth,
                 child: _AiringTodayCard(item: items[index]),
@@ -890,7 +887,8 @@ class _AiringTodayCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final time = _airingTimeFormat.format(
+    // 12-hour clock, e.g. "8:00 PM".
+    final time = Formatters.clockTime(
       DateTime.fromMillisecondsSinceEpoch(item.airingAt * 1000),
     );
     return InkWell(
@@ -1137,7 +1135,7 @@ class _RailError extends StatelessWidget {
 
 /// "Continue" rail: entry poster + progress + a one-tap increment.
 ///
-/// Virtualized [ArrowRail] with fixed extent (300 + 12 = 312) + arrows.
+/// Virtualized [ArrowRail] with fixed extent (300 + [Tokens.railGap]) + arrows.
 class _ContinueRail extends ConsumerWidget {
   const _ContinueRail({required this.entries});
 
@@ -1150,7 +1148,8 @@ class _ContinueRail extends ConsumerWidget {
     return ArrowRail(
       height: 148,
       itemCount: entries.length,
-      itemExtent: cardWidth + 12,
+      separatorWidth: Tokens.railGap,
+      itemExtent: cardWidth + Tokens.railGap,
       itemBuilder: (context, index) {
         final entry = entries[index];
         return SizedBox(

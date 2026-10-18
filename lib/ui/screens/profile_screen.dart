@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/theme/app_scroll.dart';
 import '../../core/theme/design_tokens.dart';
+import '../../core/utils/app_exception.dart';
 import '../../data/models/account.dart';
 import '../../data/models/profile_banner.dart';
 import '../../data/repositories/auth_repository.dart';
@@ -32,26 +33,53 @@ class ProfileScreen extends ConsumerWidget {
     final entryCount = ref.watch(
       myListsControllerProvider.select((s) => s.entries.length),
     );
-    final user = ref.watch(authStateProvider).value;
-    final ViewerProfile? profile = user == null
-        ? null
-        : ref.watch(viewerProfileProvider).value;
+    final authAsync = ref.watch(authStateProvider);
+    final user = authAsync.value;
+    final profileAsync = user == null ? null : ref.watch(viewerProfileProvider);
+    final ViewerProfile? profile = profileAsync?.value;
+    // A failed statistics request used to be invisible (`.value` is null on
+    // error), leaving empty "—" panels with no message and no way to retry.
+    final profileFailed =
+        profileAsync != null && profileAsync.hasError && profile == null;
+    // A saved token exists but AniList has not confirmed it yet: that is
+    // "signing in", not "guest".
+    final signingIn =
+        user == null &&
+        (authAsync.isLoading ||
+            ref.watch(authRepositoryProvider).needsValidation);
 
     return CustomScrollView(
       physics: const SmoothScrollPhysics(),
       slivers: [
         SliverToBoxAdapter(
-          child: _ProfileHeader(user: user, profile: profile),
+          child: _ProfileHeader(
+            user: user,
+            profile: profile,
+            signingIn: signingIn,
+          ),
         ),
         const SliverToBoxAdapter(child: SizedBox(height: Tokens.space20)),
         if (user == null)
-          const SliverToBoxAdapter(
+          SliverToBoxAdapter(
             child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: Tokens.space16),
-              child: _GuestCard(),
+              padding: const EdgeInsets.symmetric(horizontal: Tokens.space16),
+              child: signingIn
+                  ? _SigningInCard(checking: authAsync.isLoading)
+                  : const _GuestCard(),
             ),
           )
         else ...[
+          if (profileFailed)
+            SliverToBoxAdapter(
+              child: _Panel(
+                child: _ProfileLoadError(
+                  message: profileAsync.error is AppException
+                      ? (profileAsync.error! as AppException).userMessage
+                      : 'Could not load your AniList statistics.',
+                  onRetry: () => ref.invalidate(viewerProfileProvider),
+                ),
+              ),
+            ),
           SliverToBoxAdapter(
             child: _Panel(child: ProfileOverviewPanel(profile: profile)),
           ),
@@ -109,7 +137,7 @@ class _Panel extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         Tokens.space16,
-        Tokens.space16,
+        Tokens.space24,
         Tokens.space16,
         0,
       ),
@@ -119,10 +147,17 @@ class _Panel extends StatelessWidget {
 }
 
 class _ProfileHeader extends ConsumerWidget {
-  const _ProfileHeader({required this.user, required this.profile});
+  const _ProfileHeader({
+    required this.user,
+    required this.profile,
+    this.signingIn = false,
+  });
 
   final AuthUser? user;
   final ViewerProfile? profile;
+
+  /// A token is saved but AniList has not confirmed it yet.
+  final bool signingIn;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -131,10 +166,12 @@ class _ProfileHeader extends ConsumerWidget {
     final banner = ref.watch(profileBannerControllerProvider);
     final anilistBanner = profile?.bannerUrl;
 
-    final name = user?.name ?? 'Guest';
-    final subtitle = user == null
-        ? 'Browsing as a guest'
-        : 'Signed in with AniList';
+    final name = user?.name ?? (signingIn ? 'Signing in…' : 'Guest');
+    final subtitle = user != null
+        ? 'Signed in with AniList'
+        : signingIn
+        ? 'Confirming your AniList account'
+        : 'Browsing as a guest';
     final avatarUrl = user?.avatarUrl ?? profile?.avatarUrl;
 
     final nameBlock = Column(
@@ -420,6 +457,141 @@ class _GuestCard extends StatelessWidget {
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: scheme.onSurfaceVariant,
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Shown while a saved AniList token is waiting to be confirmed.
+///
+/// Replaces the misleading "guest" card: the user *did* sign in, AniList just
+/// has not answered the "who is this?" request yet. Validation retries in the
+/// background; the button lets the user retry immediately.
+class _SigningInCard extends ConsumerStatefulWidget {
+  const _SigningInCard({required this.checking});
+
+  /// True while the first validation request is still in flight.
+  final bool checking;
+
+  @override
+  ConsumerState<_SigningInCard> createState() => _SigningInCardState();
+}
+
+class _SigningInCardState extends ConsumerState<_SigningInCard> {
+  bool _busy = false;
+
+  Future<void> _retry() async {
+    setState(() => _busy = true);
+    try {
+      await ref.read(authRepositoryProvider).restore();
+    } on Object {
+      // Stays unconfirmed; the card keeps offering a retry.
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final waiting = widget.checking || _busy;
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(Tokens.space20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                if (waiting)
+                  const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  Icon(Icons.sync_problem_rounded, size: 18, color: scheme.primary),
+                const SizedBox(width: Tokens.space12),
+                Expanded(
+                  child: Text(
+                    waiting
+                        ? 'Confirming your AniList sign-in…'
+                        : 'AniList has not confirmed your sign-in yet',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (!waiting) ...[
+              const SizedBox(height: Tokens.space8),
+              Text(
+                'You are signed in, but AniList did not answer in time. '
+                'We will keep trying in the background — or try again now.',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: Tokens.space12),
+              FilledButton.tonalIcon(
+                onPressed: _retry,
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Try again'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Inline error for the profile statistics request, with a retry button.
+class _ProfileLoadError extends StatelessWidget {
+  const _ProfileLoadError({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Card(
+      margin: EdgeInsets.zero,
+      color: scheme.errorContainer.withValues(alpha: 0.35),
+      child: Padding(
+        padding: const EdgeInsets.all(Tokens.space16),
+        child: Row(
+          children: [
+            Icon(Icons.error_outline_rounded, color: scheme.error),
+            const SizedBox(width: Tokens.space12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Couldn't load your statistics",
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: Tokens.space2),
+                  Text(message, style: theme.textTheme.bodyMedium),
+                ],
+              ),
+            ),
+            const SizedBox(width: Tokens.space8),
+            TextButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Retry'),
             ),
           ],
         ),

@@ -181,8 +181,7 @@ class _ArrowRailState extends State<ArrowRail> {
         scrollDirection: Axis.horizontal,
         primary: false,
         // Clamping: no overscroll glow / white flash and no bounce-back
-        // spring on fast flings. Bouncing physics (SmoothScrollPhysics)
-        // caused overlap + back-and-forth on horizontal rails.
+        // spring on fast flings.
         physics: const ClampingScrollPhysics(),
         clipBehavior: Clip.hardEdge,
         addAutomaticKeepAlives: false,

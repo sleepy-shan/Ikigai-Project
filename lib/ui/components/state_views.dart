@@ -607,9 +607,13 @@ class _LoadingPosterGridState extends State<LoadingPosterGrid>
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = posterColumns(constraints.maxWidth);
+        final columnGap = posterColumnGap(constraints.maxWidth);
         final tileWidth =
-            (constraints.maxWidth - (columns - 1) * Tokens.space16) / columns;
-        final tileHeight = tileWidth / Tokens.posterAspect + 56;
+            (constraints.maxWidth -
+                (columns - 1) * columnGap -
+                Tokens.space32) /
+            columns;
+        final tileHeight = tileWidth / Tokens.posterAspect + kPosterTextHeight;
         return GridView.builder(
           padding: const EdgeInsets.all(Tokens.space16),
           physics: const NeverScrollableScrollPhysics(),
@@ -620,8 +624,8 @@ class _LoadingPosterGridState extends State<LoadingPosterGrid>
           addRepaintBoundaries: true,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
-            mainAxisSpacing: Tokens.space20,
-            crossAxisSpacing: Tokens.space16,
+            mainAxisSpacing: posterRowGap(constraints.maxWidth),
+            crossAxisSpacing: columnGap,
             childAspectRatio: tileWidth / tileHeight,
           ),
           itemCount: columns * 2,
@@ -641,11 +645,33 @@ class _LoadingPosterGridState extends State<LoadingPosterGrid>
 }
 
 /// Number of poster columns for a given width.
+///
+/// Breakpoints are intentionally a little wider than the minimum card size so
+/// posters keep breathing room instead of being packed edge to edge.
 int posterColumns(double width) {
-  if (width >= 1600) return 7;
-  if (width >= 1360) return 6;
-  if (width >= 1080) return 5;
-  if (width >= 840) return 4;
-  if (width >= 560) return 3;
+  if (width >= 1800) return 7;
+  if (width >= 1500) return 6;
+  if (width >= 1200) return 5;
+  if (width >= 900) return 4;
+  if (width >= 600) return 3;
   return 2;
 }
+
+/// Horizontal gap between poster columns; grows with the viewport.
+double posterColumnGap(double width) {
+  if (width >= 1080) return Tokens.space24;
+  if (width >= 600) return Tokens.space20;
+  return Tokens.space16;
+}
+
+/// Vertical gap between poster rows. Larger than the column gap because every
+/// poster carries a two-line title + subtitle underneath it.
+double posterRowGap(double width) {
+  if (width >= 1080) return 40;
+  if (width >= 840) return 36;
+  if (width >= 600) return 32;
+  return 28;
+}
+
+/// Height reserved under each poster for its title and subtitle text.
+const double kPosterTextHeight = 68;

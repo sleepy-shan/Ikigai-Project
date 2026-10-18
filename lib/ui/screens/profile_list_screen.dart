@@ -224,7 +224,7 @@ class _AccountEntryRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: Tokens.space16,
-        vertical: Tokens.space4,
+        vertical: Tokens.space8,
       ),
       child: Card(
         clipBehavior: Clip.antiAlias,
@@ -232,7 +232,7 @@ class _AccountEntryRow extends StatelessWidget {
         child: InkWell(
           onTap: () => context.go(Routes.mediaDetail(media.type, media.id)),
           child: Padding(
-            padding: const EdgeInsets.all(Tokens.space12),
+            padding: const EdgeInsets.all(Tokens.space16),
             child: Row(
               children: [
                 ClipRRect(
@@ -278,17 +278,18 @@ class _AccountEntryRow extends StatelessWidget {
                             if (chip != null)
                               _StatusChip(label: chip.label, color: chip.color),
                             if (showMeta) _Progress(entry: entry),
-                            if (entry.score != null && entry.score! > 0)
+                            if (entry.scoreLabel != null)
                               Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(
-                                    Icons.star_rounded,
-                                    size: 14,
-                                    color: Tokens.warning,
-                                  ),
+                                  if (!entry.scoreFormat.usesSmileys)
+                                    const Icon(
+                                      Icons.star_rounded,
+                                      size: 14,
+                                      color: Tokens.warning,
+                                    ),
                                   Text(
-                                    '${entry.score!.round()}',
+                                    entry.scoreLabel!,
                                     style: theme.textTheme.labelSmall,
                                   ),
                                 ],

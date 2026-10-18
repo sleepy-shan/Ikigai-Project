@@ -36,6 +36,10 @@ abstract final class Tokens {
   static const double iconButtonSize = 40;
   static const double inputHeight = 44;
 
+  /// Horizontal gap between cards in a rail. Rails use fixed item extents, so
+  /// the extent is always `card width + railGap`.
+  static const double railGap = 16;
+
   /// Max content width for centered layouts on ultra-wide screens.
   static const double maxContentWidth = 1280;
 

@@ -4,6 +4,10 @@
 /// single mapper can be used for both.
 library;
 
+/// Public media lists (trending, browse, search, the calendar) always send
+/// `isAdult: false`, so 18+ titles never appear in discovery surfaces. The
+/// detail query is by id and intentionally does not filter.
+
 /// Selection shared by every card and detail header.
 const String kMediaListSelection = '''
   id
@@ -54,14 +58,14 @@ String trendingQuery({required bool detail}) => detail
 query (\$page: Int, \$perPage: Int, \$type: MediaType) {
   Page(page: \$page, perPage: \$perPage) {
     pageInfo { currentPage hasNextPage total }
-    media(type: \$type, sort: TRENDING_DESC) { $kMediaDetailSelection }
+    media(type: \$type, isAdult: false, sort: TRENDING_DESC) { $kMediaDetailSelection }
   }
 }'''
     : '''
 query (\$page: Int, \$perPage: Int, \$type: MediaType) {
   Page(page: \$page, perPage: \$perPage) {
     pageInfo { currentPage hasNextPage total }
-    media(type: \$type, sort: TRENDING_DESC) { $kMediaListSelection }
+    media(type: \$type, isAdult: false, sort: TRENDING_DESC) { $kMediaListSelection }
   }
 }''';
 
@@ -76,7 +80,7 @@ query (
   Page(page: \$page, perPage: \$perPage) {
     pageInfo { currentPage hasNextPage total }
     media(
-      type: \$type, sort: \$sort, search: \$search, genre: \$genre,
+      type: \$type, isAdult: false, sort: \$sort, search: \$search, genre: \$genre,
       status: \$status, format: \$format, season: \$season, seasonYear: \$seasonYear
     ) { $kMediaDetailSelection }
   }
@@ -90,7 +94,7 @@ query (
   Page(page: \$page, perPage: \$perPage) {
     pageInfo { currentPage hasNextPage total }
     media(
-      type: \$type, sort: \$sort, search: \$search, genre: \$genre,
+      type: \$type, isAdult: false, sort: \$sort, search: \$search, genre: \$genre,
       status: \$status, format: \$format, season: \$season, seasonYear: \$seasonYear
     ) { $kMediaListSelection }
   }
@@ -129,11 +133,44 @@ query (\$page: Int, \$perPage: Int, \$airingAt_greater: Int, \$airingAt_lesser: 
       media {
         id
         type
+        isAdult
         episodes
         averageScore
         title { romaji english native }
         coverImage { large }
       }
+    }
+  }
+}''';
+
+/// Manga releases whose start date falls inside a window.
+///
+/// `startDate_greater` / `startDate_lesser` are exclusive `FuzzyDateInt`s
+/// (`YYYYMMDD`), so the filter runs on AniList's side and every week returns
+/// its own titles. Sorted by popularity so a capped fetch keeps the titles
+/// people actually look for; the app groups them by day afterwards.
+const String kMangaReleasesQuery = '''
+query (\$page: Int, \$perPage: Int, \$startDate_greater: FuzzyDateInt, \$startDate_lesser: FuzzyDateInt) {
+  Page(page: \$page, perPage: \$perPage) {
+    pageInfo { currentPage hasNextPage total }
+    media(
+      type: MANGA,
+      isAdult: false,
+      startDate_greater: \$startDate_greater,
+      startDate_lesser: \$startDate_lesser,
+      sort: POPULARITY_DESC
+    ) {
+      id
+      type
+      format
+      status
+      chapters
+      volumes
+      averageScore
+      popularity
+      startDate { year month day }
+      title { romaji english native }
+      coverImage { large color }
     }
   }
 }''';
@@ -324,9 +361,14 @@ query {
 /// Pass `status: null` for the full collection ("All"); AniList then returns
 /// every status group and the mapper flattens them. Requires a token because
 /// it reads the authenticated user's private list.
+///
+/// `user.mediaListOptions.scoreFormat` is requested because every entry's
+/// `score` is expressed in that format (100-point, 10-point, 5-star, smileys),
+/// so it is meaningless without it.
 const String kMediaListCollectionQuery = '''
 query (\$userId: Int, \$type: MediaType, \$status: MediaListStatus) {
   MediaListCollection(userId: \$userId, type: \$type, status: \$status) {
+    user { mediaListOptions { scoreFormat } }
     lists {
       name
       status

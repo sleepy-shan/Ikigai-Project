@@ -20,7 +20,6 @@ final _rangeFormat = DateFormat.MMMd();
 final _dayKeyFormat = DateFormat('yyyy-MM-dd');
 final _weekdayFormat = DateFormat('EEEE');
 final _dayNumFormat = DateFormat('MMM d');
-final _cardTimeFormat = DateFormat('hh:mm a');
 
 /// Weekly release calendar with separate Anime / Manga tabs.
 ///
@@ -223,10 +222,14 @@ class _WeekPill extends ConsumerWidget {
     );
     final controller = ref.read(calendarControllerProvider.notifier);
 
-    final monday = _mondayOf(DateTime.now()).add(
-      Duration(days: 7 * weekOffset),
+    // Calendar arithmetic (not Duration) so DST changes cannot shift the day.
+    final thisMonday = _mondayOf(DateTime.now());
+    final monday = DateTime(
+      thisMonday.year,
+      thisMonday.month,
+      thisMonday.day + 7 * weekOffset,
     );
-    final sunday = monday.add(const Duration(days: 6));
+    final sunday = DateTime(monday.year, monday.month, monday.day + 6);
     final label =
         '${_rangeFormat.format(monday)} – ${_rangeFormat.format(sunday)}';
 
@@ -278,8 +281,7 @@ class _WeekPill extends ConsumerWidget {
 }
 
 DateTime _mondayOf(DateTime date) {
-  return DateTime(date.year, date.month, date.day)
-      .subtract(Duration(days: date.weekday - 1));
+  return DateTime(date.year, date.month, date.day - (date.weekday - 1));
 }
 
 /// Day rail + selected-day grid for the active tab.
@@ -304,7 +306,7 @@ class _ScheduleBody extends ConsumerWidget {
         return const SliverEmpty(
           title: 'No manga releases this week',
           message:
-              'No manga in the top charts starts on these dates. '
+              'No manga with a known start date begins in this week. '
               'AniList only tracks a start day for manga (no airing time), '
               'so this tab groups new releases by date — try another week.',
           icon: Icons.menu_book_outlined,
@@ -504,7 +506,7 @@ class _DayRail<D> extends StatelessWidget {
           vertical: Tokens.space4,
         ),
         child: Row(
-          spacing: Tokens.space8,
+          spacing: Tokens.space12,
           children: [
             for (final day in days)
               ChoiceChip(
@@ -520,7 +522,7 @@ class _DayRail<D> extends StatelessWidget {
     }
 
     return Column(
-      spacing: Tokens.space4,
+      spacing: Tokens.space8,
       children: [
         for (final day in days)
           Builder(
@@ -686,9 +688,9 @@ class _CardGrid extends StatelessWidget {
           addRepaintBoundaries: true,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
-            mainAxisSpacing: Tokens.space12,
-            crossAxisSpacing: Tokens.space12,
-            childAspectRatio: 2.8,
+            mainAxisSpacing: Tokens.space16,
+            crossAxisSpacing: Tokens.space16,
+            childAspectRatio: 2.55,
           ),
           itemCount: itemCount,
           itemBuilder: (context, index) => RepaintBoundary(
@@ -721,7 +723,7 @@ class _EpisodeCard extends StatelessWidget {
         DateTime.fromMillisecondsSinceEpoch(item.airingAt * 1000);
     final nowSeconds = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final aired = item.airingAt <= nowSeconds;
-    final timeLabel = _cardTimeFormat.format(airDate);
+    final timeLabel = Formatters.clockTime(airDate);
     final episodeLabel = item.totalEpisodes != null
         ? 'Episode ${item.episode} / ${item.totalEpisodes}'
         : 'Episode ${item.episode}';
@@ -736,9 +738,9 @@ class _EpisodeCard extends StatelessWidget {
         onTap: () =>
             context.go(Routes.mediaDetail(item.mediaType, item.mediaId)),
         child: Padding(
-          padding: const EdgeInsets.all(Tokens.space8),
+          padding: const EdgeInsets.all(Tokens.space12),
           child: Row(
-            spacing: Tokens.space12,
+            spacing: Tokens.space16,
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(Tokens.radiusSm),
@@ -887,9 +889,9 @@ class _MangaCard extends StatelessWidget {
       child: InkWell(
         onTap: () => context.go(Routes.mediaDetail(media.type, media.id)),
         child: Padding(
-          padding: const EdgeInsets.all(Tokens.space8),
+          padding: const EdgeInsets.all(Tokens.space12),
           child: Row(
-            spacing: Tokens.space12,
+            spacing: Tokens.space16,
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(Tokens.radiusSm),

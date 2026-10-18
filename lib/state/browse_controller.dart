@@ -207,7 +207,20 @@ class BrowseController extends Notifier<BrowseState> {
   }
 
   Future<void> setSeason(MediaSeason? season) async {
-    state = state.copyWith(query: state.query.copyWith(season: season));
+    final q = state.query;
+    state = state.copyWith(
+      query: q.copyWith(
+        // A new filter starts from the first page, not page N of new results.
+        page: 1,
+        genre: q.genre,
+        status: q.status,
+        format: q.format,
+        // With clearFilters, a null season now really removes the filter.
+        season: season,
+        seasonYear: q.seasonYear,
+        clearFilters: true,
+      ),
+    );
     await load();
   }
 

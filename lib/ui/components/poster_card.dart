@@ -36,7 +36,7 @@ class PosterCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(child: _PosterImage(media: media)),
-              const SizedBox(height: Tokens.space8),
+              const SizedBox(height: Tokens.space12),
               Text(
                 media.title,
                 maxLines: 2,
@@ -46,7 +46,7 @@ class PosterCard extends StatelessWidget {
                   letterSpacing: -0.1,
                 ),
               ),
-              const SizedBox(height: Tokens.space2),
+              const SizedBox(height: Tokens.space4),
               Text(
                 _subtitle(media),
                 maxLines: 1,
@@ -307,7 +307,7 @@ class MediaRailCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(child: _PosterImage(media: media)),
-              const SizedBox(height: Tokens.space8),
+              const SizedBox(height: Tokens.space12),
               Text(
                 media.title,
                 maxLines: 1,
@@ -316,6 +316,7 @@ class MediaRailCard extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                 ),
               ),
+              const SizedBox(height: Tokens.space2),
               Text(
                 PosterCard._subtitle(media),
                 maxLines: 1,

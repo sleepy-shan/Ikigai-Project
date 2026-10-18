@@ -81,6 +81,60 @@ enum ProfileSection {
   }
 }
 
+/// How an AniList user's scores are expressed (`MediaListOptions.scoreFormat`).
+///
+/// An entry's `score` is only meaningful together with this: `85` is a great
+/// score on the 100-point scale but impossible on a 10-point or 5-star one.
+enum ScoreFormat {
+  point100('POINT_100'),
+  point10Decimal('POINT_10_DECIMAL'),
+  point10('POINT_10'),
+  point5('POINT_5'),
+  point3('POINT_3');
+
+  const ScoreFormat(this.wire);
+
+  final String wire;
+
+  /// Unknown or missing values fall back to the decimal 10-point scale, which
+  /// renders whole numbers and one-decimal scores sensibly.
+  static ScoreFormat fromWire(String? wire) {
+    for (final format in ScoreFormat.values) {
+      if (format.wire == wire) return format;
+    }
+    return ScoreFormat.point10Decimal;
+  }
+
+  /// True for the three-smiley scale, which has no numeric display.
+  bool get usesSmileys => this == ScoreFormat.point3;
+
+  /// A display label such as `85/100`, `8.5/10`, `4/5` or a smiley; null when
+  /// unrated (AniList stores "no score" as 0).
+  String? label(double? score) {
+    if (score == null || score <= 0) return null;
+    switch (this) {
+      case ScoreFormat.point100:
+        return '${score.round()}/100';
+      case ScoreFormat.point10Decimal:
+        final rounded = (score * 10).round() / 10;
+        final text = rounded == rounded.roundToDouble()
+            ? rounded.toStringAsFixed(0)
+            : rounded.toStringAsFixed(1);
+        return '$text/10';
+      case ScoreFormat.point10:
+        return '${score.round()}/10';
+      case ScoreFormat.point5:
+        return '${score.round()}/5';
+      case ScoreFormat.point3:
+        return switch (score.round()) {
+          1 => '\u{1F641}',
+          2 => '\u{1F610}',
+          _ => '\u{1F642}',
+        };
+    }
+  }
+}
+
 /// One title on the user's AniList list, with their progress and score.
 class AccountListEntry {
   const AccountListEntry({
@@ -89,6 +143,7 @@ class AccountListEntry {
     this.progress = 0,
     this.progressVolumes,
     this.score,
+    this.scoreFormat = ScoreFormat.point10Decimal,
     this.updatedAt,
   });
 
@@ -99,9 +154,15 @@ class AccountListEntry {
   final int progress;
   final int? progressVolumes;
 
-  /// AniList score in the user's own format (null when unrated).
+  /// AniList score in the user's own [scoreFormat] (null when unrated).
   final double? score;
+
+  /// The format [score] is expressed in.
+  final ScoreFormat scoreFormat;
   final DateTime? updatedAt;
+
+  /// [score] ready to display in the user's own format; null when unrated.
+  String? get scoreLabel => scoreFormat.label(score);
 }
 
 /// Kinds of AniList activity shown in the profile history.

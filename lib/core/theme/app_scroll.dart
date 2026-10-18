@@ -5,8 +5,8 @@ import 'package:flutter/material.dart';
 ///
 /// - Mouse / trackpad / touch drag all work (Flutter web default only allows
 ///   touch).
-/// - [SmoothScrollPhysics] lowers friction and softens the spring so rails
-///   and grids glide instead of stopping abruptly.
+/// - [SmoothScrollPhysics] clamps at the edges (no bounce) and caps the fling
+///   speed so fast scrolling can never overshoot and spring back.
 /// - [RevealOnScroll] + [HoverLift] give every list a staggered, smooth
 ///   entrance and tactile hover feedback.
 class AppScrollBehavior extends MaterialScrollBehavior {
@@ -22,7 +22,18 @@ class AppScrollBehavior extends MaterialScrollBehavior {
 
   @override
   ScrollPhysics getScrollPhysics(BuildContext context) {
-    return const SmoothScrollPhysics(parent: ClampingScrollPhysics());
+    return const SmoothScrollPhysics();
+  }
+
+  // Clamping physics never overscrolls, so the stretch/glow indicator would
+  // only flash on touch devices; skip it entirely.
+  @override
+  Widget buildOverscrollIndicator(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) {
+    return child;
   }
 
   @override
@@ -41,11 +52,20 @@ class AppScrollBehavior extends MaterialScrollBehavior {
   }
 }
 
-/// Low-friction scroll physics for a smooth, gliding feel.
+/// Scroll physics used by every scrollable in the app.
 ///
-/// Keeps [BouncingScrollPhysics] overscroll on touch devices but retunes the
-/// spring so motion settles softly instead of snapping.
-class SmoothScrollPhysics extends BouncingScrollPhysics {
+/// This is deliberately **clamping** (no overscroll, no bounce-back spring).
+///
+/// The previous implementation extended [BouncingScrollPhysics] with a
+/// near-zero friction factor and a barely-damped spring. On the web, a fast
+/// wheel/trackpad fling or a quick touch swipe therefore overshot the edge by
+/// a long way and the spring then oscillated back and forth ("over
+/// exceeding"), on both vertical pages and horizontal strips (calendar day
+/// chips, rails). Clamping stops cleanly at the edge instead.
+///
+/// The fling velocity is capped so one hard swipe cannot launch the list
+/// across a whole page; everything else keeps Flutter's tuned defaults.
+class SmoothScrollPhysics extends ClampingScrollPhysics {
   const SmoothScrollPhysics({super.parent});
 
   @override
@@ -54,23 +74,10 @@ class SmoothScrollPhysics extends BouncingScrollPhysics {
   }
 
   @override
-  double frictionFactor(double overscrollFraction) {
-    // Less resistance than the default 0.52 curve -> longer glide.
-    return 0.08 * (1.0 - overscrollFraction.clamp(0.0, 1.0));
-  }
-
-  @override
-  SpringDescription get spring => const SpringDescription(
-        mass: 60,
-        stiffness: 90,
-        damping: 1.15,
-      );
-
-  @override
   double get minFlingVelocity => 40;
 
   @override
-  double get maxFlingVelocity => 12000;
+  double get maxFlingVelocity => 6000;
 }
 
 /// Staggered fade + slide entrance. Wrap rail/grid children with an

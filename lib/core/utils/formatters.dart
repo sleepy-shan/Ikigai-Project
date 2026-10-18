@@ -2,6 +2,11 @@ import 'package:intl/intl.dart';
 
 /// Presentation helpers shared by the UI layer.
 abstract final class Formatters {
+  static final DateFormat _clockFormat = DateFormat('h:mm a');
+
+  /// Local wall-clock time on a 12-hour clock: "8:30 PM" (never 20:30).
+  static String clockTime(DateTime time) => _clockFormat.format(time);
+
   /// "2026-10-10" -> "Oct 10, 2026"; falls back to [fallback] when absent.
   static String date(String? isoDate, {String fallback = 'Unknown'}) {
     if (isoDate == null || isoDate.isEmpty) return fallback;
