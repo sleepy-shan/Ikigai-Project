@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
+import 'core/utils/url_cleaner.dart';
 import 'data/repositories/auth_repository.dart';
 import 'state/providers.dart';
 
@@ -31,12 +32,19 @@ Future<void> main() async {
   final prefs = await _loadPreferences();
 
   // AniList OAuth implicit flow: AniList redirects back to the registered
-  // Redirect URL with `#access_token=...`. Capture it once and persist it
-  // so the auth provider can validate it on first listen.
+  // Redirect URL with `#access_token=...&expires_in=...`. Capture it once and
+  // persist it so the auth provider can validate it on first listen.
+  //
+  // Only the fragment is read, and only right after this browser started a
+  // sign-in (see `AniListAuthRepository.acceptRedirect`), so a crafted link
+  // cannot sign someone into another person's account.
   try {
-    final redirectToken = parseAccessTokenFromUri(Uri.base);
-    if (redirectToken != null && redirectToken.isNotEmpty) {
-      await prefs.setString(AniListAuthRepository.tokenKey, redirectToken);
+    final base = Uri.base;
+    if (parseAccessTokenFromUri(base) != null) {
+      await AniListAuthRepository.acceptRedirect(prefs, base);
+      // Whether it was accepted or ignored, a token must not stay in the
+      // address bar and browser history.
+      clearUrlFragment();
     }
   } on Object catch (error) {
     // Token capture must never block startup (e.g. blocked storage).

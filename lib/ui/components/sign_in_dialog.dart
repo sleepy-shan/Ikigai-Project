@@ -4,6 +4,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/config/app_config.dart';
 import '../../core/theme/design_tokens.dart';
+import '../../data/repositories/auth_repository.dart';
+import '../../state/providers.dart';
 
 /// Opens the sign-in dialog (AniList OAuth only — no manual token entry).
 ///
@@ -43,6 +45,11 @@ class _SignInDialogState extends ConsumerState<_SignInDialog> {
       _error = null;
     });
     try {
+      // Arm the redirect handshake: main() only accepts a token that comes
+      // back shortly after this tap.
+      await AniListAuthRepository.markLoginStarted(
+        ref.read(sharedPreferencesProvider),
+      );
       final ok = await launchUrl(
         AppConfig.anilistLoginUri(),
         webOnlyWindowName: '_self',

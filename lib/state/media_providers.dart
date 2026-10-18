@@ -92,20 +92,21 @@ final mediaRailProvider =
   }
 });
 
-/// Episodes airing today (midnight to midnight, local time).
+/// Every episode airing today (midnight to midnight, local time).
 ///
-/// `autoDispose` for the same reason as [mediaRailProvider]; the repository
-/// TTL cache keeps revisits cheap.
+/// Follows the schedule's pages (rather than one capped page), so a busy day
+/// is complete. `autoDispose` for the same reason as [mediaRailProvider]; the
+/// repository TTL cache keeps revisits cheap.
 final airingTodayProvider =
     FutureProvider.autoDispose<List<AiringScheduleItem>>((ref) async {
   final repo = ref.watch(mediaRepositoryProvider);
   final now = DateTime.now();
   final start = DateTime(now.year, now.month, now.day);
-  final end = start.add(const Duration(days: 1));
-  return repo.airingSchedule(
+  // Calendar arithmetic, not `Duration(days: 1)` (25h/23h days at DST changes).
+  final end = DateTime(now.year, now.month, now.day + 1);
+  return repo.airingScheduleAll(
     from: start.millisecondsSinceEpoch ~/ 1000,
     to: end.millisecondsSinceEpoch ~/ 1000,
-    perPage: 24,
   );
 });
 

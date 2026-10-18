@@ -23,9 +23,13 @@ class MediaEntryGrid extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = posterColumns(constraints.maxWidth);
+        final columnGap = posterColumnGap(constraints.maxWidth);
         final tileWidth =
-            (constraints.maxWidth - (columns - 1) * Tokens.space16) / columns;
-        final tileHeight = tileWidth / Tokens.posterAspect + 76;
+            (constraints.maxWidth -
+                (columns - 1) * columnGap -
+                Tokens.space32) /
+            columns;
+        final tileHeight = tileWidth / Tokens.posterAspect + 92;
 
         return GridView.builder(
           physics: const SmoothScrollPhysics(),
@@ -38,8 +42,8 @@ class MediaEntryGrid extends StatelessWidget {
           ),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
-            mainAxisSpacing: Tokens.space20,
-            crossAxisSpacing: Tokens.space16,
+            mainAxisSpacing: posterRowGap(constraints.maxWidth),
+            crossAxisSpacing: columnGap,
             childAspectRatio: tileWidth / tileHeight,
           ),
           itemCount: entries.length,
@@ -204,9 +208,13 @@ class _MediaGridState extends State<MediaGrid> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = posterColumns(constraints.maxWidth);
+        final columnGap = posterColumnGap(constraints.maxWidth);
         final tileWidth =
-            (constraints.maxWidth - (columns - 1) * Tokens.space16) / columns;
-        final tileHeight = tileWidth / Tokens.posterAspect + 52;
+            (constraints.maxWidth -
+                (columns - 1) * columnGap -
+                Tokens.space32) /
+            columns;
+        final tileHeight = tileWidth / Tokens.posterAspect + kPosterTextHeight;
 
         return Stack(
           children: [
@@ -222,8 +230,8 @@ class _MediaGridState extends State<MediaGrid> {
               ),
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: columns,
-                mainAxisSpacing: Tokens.space20,
-                crossAxisSpacing: Tokens.space16,
+                mainAxisSpacing: posterRowGap(constraints.maxWidth),
+                crossAxisSpacing: columnGap,
                 childAspectRatio: tileWidth / tileHeight,
               ),
               itemCount: widget.items.length + (widget.hasMore ? 1 : 0),
@@ -265,7 +273,7 @@ class _MediaGridState extends State<MediaGrid> {
 /// Horizontal rail used on the dashboard — glides with smooth physics,
 /// arrow buttons, and edge fades on desktop.
 ///
-/// Uses [ArrowRail] with a fixed `itemExtent` (148 + 12 separator = 160)
+/// Uses [ArrowRail] with a fixed `itemExtent` (148 + [Tokens.railGap])
 /// so the viewport skips child measurement.
 class MediaRailList extends StatelessWidget {
   const MediaRailList({required this.items, super.key});
@@ -275,10 +283,11 @@ class MediaRailList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ArrowRail(
-      height: 252,
+      height: 264,
       itemCount: items.length,
-      // 148px card + 12px separator.
-      itemExtent: 160,
+      separatorWidth: Tokens.railGap,
+      // 148px card + the rail gap.
+      itemExtent: 148 + Tokens.railGap,
       // No RevealOnScroll here: inside a virtualized horizontal viewport
       // recycled items would restart at opacity 0 + slide offset on every
       // fast fling, causing white flash and overlapping cards.
@@ -317,10 +326,10 @@ class SliverPosterGrid extends StatelessWidget {
       builder: (context, constraints) {
         final width = constraints.crossAxisExtent;
         final columns = columnsForWidth(width);
+        final columnGap = posterColumnGap(width);
         final tileWidth =
-            (width - (columns - 1) * Tokens.space16 - Tokens.space32) /
-                columns;
-        final tileHeight = tileWidth / Tokens.posterAspect + 52;
+            (width - (columns - 1) * columnGap - Tokens.space32) / columns;
+        final tileHeight = tileWidth / Tokens.posterAspect + kPosterTextHeight;
         return SliverPadding(
           padding: const EdgeInsets.only(
             left: Tokens.space16,
@@ -330,8 +339,8 @@ class SliverPosterGrid extends StatelessWidget {
           sliver: SliverGrid.builder(
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: columns,
-              mainAxisSpacing: Tokens.space20,
-              crossAxisSpacing: Tokens.space16,
+              mainAxisSpacing: posterRowGap(width),
+              crossAxisSpacing: columnGap,
               childAspectRatio: tileWidth / tileHeight,
             ),
             // No keep-alives for offscreen posters; repaint boundaries

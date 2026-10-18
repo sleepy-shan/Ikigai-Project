@@ -174,33 +174,35 @@ abstract final class AniListMapper {
         .join(' ');
   }
 
+  /// Parses `Page.airingSchedules`.
+  ///
+  /// Entries whose media is missing (or has no usable id) are dropped rather
+  /// than mapped to `mediaId: 0`, which produced a dead `/media/anime/0` link.
+  /// Adult titles are dropped too: the schedule root has no `isAdult` filter
+  /// argument, so it has to be applied here.
   static List<AiringScheduleItem> airingSchedule(Object? raw) {
     if (raw is! List) return const [];
-    return raw
-        .whereType<Map>()
-        .map((item) {
-          final media = item['media'];
-          final mediaMap = media is Map
-              ? media.map((key, value) => MapEntry(key.toString(), value))
-              : const {};
-          return AiringScheduleItem(
-            id: (item['id'] as num?)?.toInt() ?? 0,
-            mediaId: (mediaMap['id'] as num?)?.toInt() ?? 0,
-            mediaType: MediaType.fromWire(mediaMap['type'] as String?),
-            title: AniListMapper._title(
-              (mediaMap['title'] as Map?)?.map(
-                    (key, value) => MapEntry(key.toString(), value),
-                  ) ??
-                  const {},
-            ),
-            coverUrl: AniListMapper._coverUrl(mediaMap['coverImage'] as Map?),
-            episode: (item['episode'] as num?)?.toInt() ?? 0,
-            airingAt: (item['airingAt'] as num?)?.toInt() ?? 0,
-            totalEpisodes: (mediaMap['episodes'] as num?)?.toInt(),
-            averageScore: (mediaMap['averageScore'] as num?)?.toInt(),
-          );
-        })
-        .toList(growable: false);
+    final out = <AiringScheduleItem>[];
+    for (final item in raw.whereType<Map>()) {
+      final media = _asMap(item['media']);
+      final mediaId = (media?['id'] as num?)?.toInt();
+      if (media == null || mediaId == null || mediaId <= 0) continue;
+      if (media['isAdult'] == true) continue;
+      out.add(
+        AiringScheduleItem(
+          id: (item['id'] as num?)?.toInt() ?? 0,
+          mediaId: mediaId,
+          mediaType: MediaType.fromWire(media['type'] as String?),
+          title: AniListMapper._title(_asMap(media['title']) ?? const {}),
+          coverUrl: AniListMapper._coverUrl(media['coverImage'] as Map?),
+          episode: (item['episode'] as num?)?.toInt() ?? 0,
+          airingAt: (item['airingAt'] as num?)?.toInt() ?? 0,
+          totalEpisodes: (media['episodes'] as num?)?.toInt(),
+          averageScore: (media['averageScore'] as num?)?.toInt(),
+        ),
+      );
+    }
+    return List.unmodifiable(out);
   }
 
   /// Parses a `Page.characters` payload for the search tab.
@@ -495,6 +497,11 @@ abstract final class AniListMapper {
     final map = _asMap(raw);
     final lists = map?['lists'];
     if (lists is! List) return const [];
+    // Every `score` below is expressed in this format.
+    final scoreFormat = ScoreFormat.fromWire(
+      _asMap(_asMap(_asMap(map?['user'])?['mediaListOptions']))?['scoreFormat']
+          as String?,
+    );
     final out = <AccountListEntry>[];
     for (final list in lists) {
       final entries = _asMap(list)?['entries'];
@@ -512,6 +519,7 @@ abstract final class AniListMapper {
             progress: (entry['progress'] as num?)?.toInt() ?? 0,
             progressVolumes: (entry['progressVolumes'] as num?)?.toInt(),
             score: (entry['score'] as num?)?.toDouble(),
+            scoreFormat: scoreFormat,
             updatedAt: seconds == null
                 ? null
                 : DateTime.fromMillisecondsSinceEpoch(seconds * 1000),

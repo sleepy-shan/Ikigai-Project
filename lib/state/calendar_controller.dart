@@ -80,7 +80,11 @@ class CalendarState {
 /// kept so the list does not flash empty (keep-previous-data).
 class CalendarController extends Notifier<CalendarState> {
   MediaRepository get _repo => ref.read(mediaRepositoryProvider);
+
+  // Independent monotonic ids: the anime and manga loads run concurrently, and
+  // each must only discard *its own* superseded responses.
   int _loadId = 0;
+  int _mangaLoadId = 0;
 
   @override
   CalendarState build() {
@@ -88,17 +92,26 @@ class CalendarController extends Notifier<CalendarState> {
     return const CalendarState();
   }
 
+  /// Local midnight on the Monday of the selected week.
+  ///
+  /// Calendar arithmetic (`DateTime(y, m, d + n)`) is used instead of adding
+  /// `Duration(days: n)`: a Duration is a fixed number of 24-hour periods, so
+  /// across a daylight-saving change it lands an hour off and can slip into
+  /// the wrong day or week.
   DateTime get _weekStart {
     final now = DateTime.now();
-    final monday = now.subtract(Duration(days: now.weekday - 1));
     return DateTime(
-      monday.year,
-      monday.month,
-      monday.day,
-    ).add(Duration(days: 7 * state.weekOffset));
+      now.year,
+      now.month,
+      now.day - (now.weekday - 1) + 7 * state.weekOffset,
+    );
   }
 
-  DateTime get _weekEnd => _weekStart.add(const Duration(days: 7));
+  /// Exclusive end of the selected week (next Monday, local midnight).
+  DateTime get _weekEnd {
+    final start = _weekStart;
+    return DateTime(start.year, start.month, start.day + 7);
+  }
 
   void setTab(CalendarTab tab) {
     if (state.tab == tab) return;
@@ -121,10 +134,11 @@ class CalendarController extends Notifier<CalendarState> {
     try {
       final start = _weekStart;
       final end = _weekEnd;
-      final items = await _repo.airingSchedule(
+      // The whole week, not just the first page: a real week has hundreds
+      // of episodes.
+      final items = await _repo.airingScheduleAll(
         from: start.millisecondsSinceEpoch ~/ 1000,
         to: end.millisecondsSinceEpoch ~/ 1000,
-        perPage: 50,
       );
       if (id != _loadId) return;
       state = state.copyWith(
@@ -149,7 +163,12 @@ class CalendarController extends Notifier<CalendarState> {
 
   /// Manga has no hourly airing schedule on AniList, so the manga tab shows
   /// titles whose `startDate` falls inside the selected week (date-only).
+  ///
+  /// The week is passed to AniList as a start-date window, so every week
+  /// fetches its own titles (previously one fixed "newest first" query was
+  /// filtered locally, which left the current week empty).
   Future<void> loadManga() async {
+    final id = ++_mangaLoadId;
     state = state.copyWith(
       mangaStatus: LoadStatus.loading,
       mangaErrorMessage: null,
@@ -157,14 +176,10 @@ class CalendarController extends Notifier<CalendarState> {
     try {
       final start = _weekStart;
       final end = _weekEnd;
-      final page = await _repo.browse(
-        BrowseQuery(
-          type: MediaType.manga,
-          sort: MediaSort.startDate,
-          perPage: 50,
-        ),
-      );
-      final inWeek = page.items.where((m) {
+      final fetched = await _repo.mangaReleases(from: start, to: end);
+      if (id != _mangaLoadId) return; // a newer week was requested.
+      // Defensive: only titles with a full start date inside the week.
+      final inWeek = fetched.where((m) {
         final date = m.startDate == null
             ? null
             : DateTime.tryParse(m.startDate!);
@@ -172,18 +187,25 @@ class CalendarController extends Notifier<CalendarState> {
         final day = DateTime(date.year, date.month, date.day);
         return !day.isBefore(start) && day.isBefore(end);
       }).toList()
-        ..sort((a, b) => (a.startDate ?? '').compareTo(b.startDate ?? ''));
+        ..sort((a, b) {
+          final byDate = (a.startDate ?? '').compareTo(b.startDate ?? '');
+          return byDate != 0
+              ? byDate
+              : (b.popularity ?? 0).compareTo(a.popularity ?? 0);
+        });
       state = state.copyWith(
         mangaStatus: LoadStatus.success,
         mangaItems: inWeek,
         mangaErrorMessage: null,
       );
     } on AppException catch (error) {
+      if (id != _mangaLoadId) return;
       state = state.copyWith(
         mangaStatus: LoadStatus.error,
         mangaErrorMessage: error.userMessage,
       );
     } catch (error) {
+      if (id != _mangaLoadId) return;
       state = state.copyWith(
         mangaStatus: LoadStatus.error,
         mangaErrorMessage: 'Could not load manga releases: $error',

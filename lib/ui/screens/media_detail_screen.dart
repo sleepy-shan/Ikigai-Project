@@ -675,7 +675,7 @@ class _TrackingPanel extends ConsumerWidget {
 
 /// Horizontal strip of sequels/prequels/side stories.
 ///
-/// [ArrowRail] with fixed extent (148 + 12 = 160) + desktop arrows.
+/// [ArrowRail] with fixed extent (148 + [Tokens.railGap]) + desktop arrows.
 class _RelationStrip extends StatelessWidget {
   const _RelationStrip({required this.relations});
 
@@ -692,7 +692,8 @@ class _RelationStrip extends StatelessWidget {
         ArrowRail(
           height: 236,
           itemCount: relations.length,
-          itemExtent: 160,
+          separatorWidth: Tokens.railGap,
+          itemExtent: 148 + Tokens.railGap,
           itemBuilder: (context, index) {
             final edge = relations[index];
             return SizedBox(
@@ -740,7 +741,8 @@ class _RecommendationStrip extends StatelessWidget {
         ArrowRail(
           height: 236,
           itemCount: recommendations.length,
-          itemExtent: 160,
+          separatorWidth: Tokens.railGap,
+          itemExtent: 148 + Tokens.railGap,
           itemBuilder: (context, index) => SizedBox(
             width: 148,
             height: 236,
