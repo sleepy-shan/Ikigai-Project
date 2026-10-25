@@ -155,5 +155,69 @@ void main() {
       expect((await repo.setProgress(9, 3)).progress, 3);
     });
   });
-}
 
+  group('LocalTrackingRepository regressions', () {
+    test('re-adding a tracked title keeps its progress and score', () async {
+      final repo = await _repo();
+      await repo.addOrUpdate(
+        media: _media(),
+        status: ListStatus.watching,
+        progress: 5,
+      );
+      await repo.setScore(1, 9);
+
+      final entry = await repo.addOrUpdate(
+        media: _media(),
+        status: ListStatus.watching,
+      );
+      expect(entry.progress, 5);
+      expect(entry.score, 9);
+    });
+
+    test('restart on a completed title reopens it as watching', () async {
+      final repo = await _repo();
+      await repo.addOrUpdate(media: _media(), status: ListStatus.completed);
+
+      final entry = await repo.setProgress(1, 0);
+      expect(entry.status, ListStatus.watching);
+      expect(entry.completedAt, isNull);
+    });
+
+    test('explicit status change to watching is not forced back to completed',
+        () async {
+      final repo = await _repo();
+      await repo.addOrUpdate(media: _media(), status: ListStatus.watching);
+      await repo.setProgress(1, 12); // reaches total → completed
+      final entry = await repo.setStatus(1, ListStatus.watching);
+      expect(entry.status, ListStatus.watching);
+      expect(entry.progress, 12);
+    });
+
+    test('incrementProgress keeps paused and dropped statuses', () async {
+      final repo = await _repo();
+      await repo.addOrUpdate(
+        media: _media(id: 7, episodes: null),
+        status: ListStatus.paused,
+      );
+      final entry = await repo.incrementProgress(7);
+      expect(entry.status, ListStatus.paused);
+      expect(entry.progress, 1);
+    });
+
+    test('an unreadable store is backed up before a write replaces it',
+        () async {
+      SharedPreferences.setMockInitialValues({
+        'ikigai.tracking.v1': '[{"media_id": "not-a-valid-entry"',
+      });
+      final prefs = await SharedPreferences.getInstance();
+      final repo = LocalTrackingRepository(prefs);
+
+      await repo.addOrUpdate(media: _media(), status: ListStatus.planning);
+
+      expect(
+        prefs.getString('ikigai.tracking.v1.corrupt-backup'),
+        '[{"media_id": "not-a-valid-entry"',
+      );
+    });
+  });
+}

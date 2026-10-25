@@ -22,11 +22,12 @@ abstract interface class TrackingRepository {
 
   /// Adds a title to the list (or updates it when already tracked).
   ///
+  /// For a tracked title, a null [progress] or [score] keeps the stored value.
   /// Returns the resulting entry.
   Future<MediaEntry> addOrUpdate({
     required Media media,
     required ListStatus status,
-    int progress = 0,
+    int? progress,
     int? score,
     String? notes,
   });
@@ -65,6 +66,9 @@ class LocalTrackingRepository implements TrackingRepository {
   static const String _storageKey = 'ikigai.tracking.v1';
   static const String _legacyStorageKey = 'sandwich.tracking.v1';
 
+  /// Where an unreadable store is preserved before a write replaces it.
+  static const String _corruptBackupKey = 'ikigai.tracking.v1.corrupt-backup';
+
   final SharedPreferences _prefs;
   final _controller = StreamController<List<MediaEntry>>.broadcast();
 
@@ -76,11 +80,16 @@ class LocalTrackingRepository implements TrackingRepository {
     yield* _controller.stream;
   }
 
+  /// Adds a title, or updates it when it is already tracked.
+  ///
+  /// For an existing entry, [progress] and [score] are only changed when the
+  /// caller supplies them. Previously an omitted progress reset the entry to
+  /// 0 and an omitted score erased the rating.
   @override
   Future<MediaEntry> addOrUpdate({
     required Media media,
     required ListStatus status,
-    int progress = 0,
+    int? progress,
     int? score,
     String? notes,
   }) async {
@@ -90,44 +99,45 @@ class LocalTrackingRepository implements TrackingRepository {
       (e) => e.mediaId == media.id && e.type == media.type,
     );
 
-    final safeProgress = media.totalUnits == null
-        ? progress
-        : progress.clamp(0, media.totalUnits!);
-
     final MediaEntry entry;
     if (index >= 0) {
       final existing = entries[index];
-      entry = existing.copyWith(
+      final base = existing.copyWith(
         title: media.title,
         coverUrl: media.coverUrl.isEmpty ? existing.coverUrl : media.coverUrl,
         totalUnits: media.totalUnits,
-        status: status,
-        progress: safeProgress,
-        score: score,
+        score: score == null ? existing.score : _clampScore(score),
         notes: notes ?? existing.notes,
-        startedAt: existing.startedAt ?? now,
-        completedAt: status == ListStatus.completed
-            ? (existing.completedAt ?? now)
-            : null,
         updatedAt: now,
+      );
+      entry = _withStatus(
+        base,
+        status,
+        progress: progress ?? existing.progress,
+        now: now,
       );
       entries[index] = entry;
     } else {
-      entry = MediaEntry(
+      final total = media.totalUnits;
+      final startProgress = progress == null
+          ? 0
+          : (total == null ? progress : progress.clamp(0, total).toInt());
+      final draft = MediaEntry(
         mediaId: media.id,
         type: media.type,
         title: media.title,
         coverUrl: media.coverUrl,
-        totalUnits: media.totalUnits,
+        totalUnits: total,
         status: status,
-        progress: safeProgress,
-        score: score,
+        progress: startProgress,
+        score: score == null ? null : _clampScore(score),
         notes: notes,
         startedAt: now,
-        completedAt: status == ListStatus.completed ? now : null,
+        completedAt: null,
         createdAt: now,
         updatedAt: now,
       );
+      entry = _withStatus(draft, status, progress: startProgress, now: now);
       entries.add(entry);
     }
 
@@ -139,14 +149,11 @@ class LocalTrackingRepository implements TrackingRepository {
   Future<MediaEntry> setStatus(int mediaId, ListStatus status) async {
     return _mutate(mediaId, (entry) {
       final now = DateTime.now();
-      return entry.copyWith(
-        status: status,
-        progress: status == ListStatus.completed && entry.totalUnits != null
-            ? entry.totalUnits!
-            : entry.progress,
-        startedAt: entry.startedAt ?? now,
-        completedAt: status == ListStatus.completed ? now : null,
-        updatedAt: now,
+      return _withStatus(
+        entry.copyWith(updatedAt: now),
+        status,
+        progress: entry.progress,
+        now: now,
       );
     });
   }
@@ -154,18 +161,13 @@ class LocalTrackingRepository implements TrackingRepository {
   @override
   Future<MediaEntry> setProgress(int mediaId, int progress) async {
     return _mutate(mediaId, (entry) {
-      final clamped = entry.totalUnits == null
-          ? progress.clamp(0, 1 << 30)
-          : progress.clamp(0, entry.totalUnits!);
-      return entry.copyWith(
-        progress: clamped,
-        status:
-            entry.status == ListStatus.planning &&
-                clamped > 0 &&
-                entry.status != ListStatus.completed
-            ? ListStatus.watching
-            : entry.status,
-        updatedAt: DateTime.now(),
+      final now = DateTime.now();
+      return _withStatus(
+        entry.copyWith(updatedAt: now),
+        entry.status,
+        progress: _clampProgress(progress, entry.totalUnits),
+        now: now,
+        fromProgressChange: true,
       );
     });
   }
@@ -173,16 +175,14 @@ class LocalTrackingRepository implements TrackingRepository {
   @override
   Future<MediaEntry> incrementProgress(int mediaId) async {
     return _mutate(mediaId, (entry) {
-      final next = entry.progress + 1;
-      final total = entry.totalUnits;
-      final clamped = total == null ? next : next.clamp(0, total);
-      return entry.copyWith(
-        progress: clamped,
-        status: total != null && clamped >= total
-            ? ListStatus.completed
-            : ListStatus.watching,
-        completedAt: total != null && clamped >= total ? DateTime.now() : null,
-        updatedAt: DateTime.now(),
+      final now = DateTime.now();
+      final next = _clampProgress(entry.progress + 1, entry.totalUnits);
+      return _withStatus(
+        entry.copyWith(updatedAt: now),
+        entry.status,
+        progress: next,
+        now: now,
+        fromProgressChange: true,
       );
     });
   }
@@ -191,7 +191,7 @@ class LocalTrackingRepository implements TrackingRepository {
   Future<MediaEntry> setScore(int mediaId, int? score) async {
     return _mutate(mediaId, (entry) {
       return entry.copyWith(
-        score: score?.clamp(0, 10),
+        score: score == null ? null : _clampScore(score),
         updatedAt: DateTime.now(),
       );
     });
@@ -213,6 +213,63 @@ class LocalTrackingRepository implements TrackingRepository {
     return index >= 0 ? entries[index] : null;
   }
 
+  // ---------------------------------------------------------------------------
+  // Status and progress rules (single place, so every mutation agrees).
+  // ---------------------------------------------------------------------------
+
+  static int _clampScore(int score) => score.clamp(0, 10).toInt();
+
+  static int _clampProgress(int progress, int? total) {
+    final floor = progress < 0 ? 0 : progress;
+    if (total == null) return floor;
+    return floor > total ? total : floor;
+  }
+
+  /// Applies [status] and [progress] together and keeps the dates consistent.
+  ///
+  /// Progress changes ([fromProgressChange]) drive the status:
+  /// * Reaching a known total completes the entry.
+  /// * Dropping below the total of a completed entry reopens it as watching
+  ///   (this is what "restart" relies on).
+  /// * Progress above zero moves a planned entry to watching.
+  ///
+  /// Explicit status changes are applied as requested. Completing an entry
+  /// fills its progress to the known total.
+  static MediaEntry _withStatus(
+    MediaEntry entry,
+    ListStatus requested, {
+    required int progress,
+    required DateTime now,
+    bool fromProgressChange = false,
+  }) {
+    final total = entry.totalUnits;
+    final ListStatus status;
+    if (fromProgressChange) {
+      final reached = total != null && progress >= total;
+      if (reached) {
+        status = ListStatus.completed;
+      } else if (entry.status == ListStatus.completed && total != null) {
+        status = ListStatus.watching;
+      } else if (entry.status == ListStatus.planning && progress > 0) {
+        status = ListStatus.watching;
+      } else {
+        status = entry.status;
+      }
+    } else {
+      status = requested;
+    }
+
+    final isCompleted = status == ListStatus.completed;
+    final effectiveProgress = isCompleted && total != null ? total : progress;
+
+    return entry.copyWith(
+      status: status,
+      progress: effectiveProgress,
+      startedAt: entry.startedAt ?? (effectiveProgress > 0 ? now : null),
+      completedAt: isCompleted ? (entry.completedAt ?? now) : null,
+    );
+  }
+
   Future<MediaEntry> _mutate(
     int mediaId,
     MediaEntry Function(MediaEntry entry) transform,
@@ -231,23 +288,46 @@ class LocalTrackingRepository implements TrackingRepository {
     return updated;
   }
 
-  List<MediaEntry> _readAll() {
-    final raw =
-        _prefs.getString(_storageKey) ?? _prefs.getString(_legacyStorageKey);
-    if (raw == null || raw.isEmpty) return [];
+  // ---------------------------------------------------------------------------
+  // Persistence.
+  // ---------------------------------------------------------------------------
+
+  /// Parses the stored JSON. Returns null when anything in it is unreadable,
+  /// so callers can tell "empty" apart from "corrupt".
+  static List<MediaEntry>? _parseStrict(String raw) {
     try {
       final decoded = jsonDecode(raw);
-      if (decoded is! List) return [];
-      return decoded
-          .whereType<Map<String, dynamic>>()
-          .map(MediaEntry.fromJson)
-          .toList();
+      if (decoded is! List) return null;
+      return [
+        for (final item in decoded)
+          MediaEntry.fromJson(item as Map<String, dynamic>),
+      ];
     } on Object {
-      return [];
+      return null;
     }
   }
 
+  String? _storedRaw() {
+    final raw =
+        _prefs.getString(_storageKey) ?? _prefs.getString(_legacyStorageKey);
+    return (raw == null || raw.isEmpty) ? null : raw;
+  }
+
+  List<MediaEntry> _readAll() {
+    final raw = _storedRaw();
+    if (raw == null) return [];
+    return _parseStrict(raw) ?? [];
+  }
+
   Future<void> _writeAll(List<MediaEntry> entries) async {
+    // Before replacing the stored list, keep a copy of anything that could
+    // not be read. Previously an unreadable store was treated as empty and
+    // the next add or remove silently overwrote it.
+    final raw = _storedRaw();
+    if (raw != null && _parseStrict(raw) == null) {
+      await _prefs.setString(_corruptBackupKey, raw);
+    }
+
     final encoded = jsonEncode(entries.map((e) => e.toJson()).toList());
     final ok = await _prefs.setString(_storageKey, encoded);
     if (!ok) {

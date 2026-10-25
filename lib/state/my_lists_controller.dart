@@ -165,7 +165,7 @@ class MyListsController extends Notifier<MyListsState> {
   Future<MediaEntry> addTo({
     required Media media,
     required ListStatus status,
-    int progress = 0,
+    int? progress,
     int? score,
     String? notes,
   }) {
