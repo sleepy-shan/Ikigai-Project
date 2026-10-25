@@ -150,7 +150,13 @@ class AniListAuthRepository implements AuthRepository {
   String? _token;
   final _controller = StreamController<AuthUser?>.broadcast();
 
-  /// Saved session has been loaded from storage (done once).
+  /// The saved session has been read from local storage (done once).
+  bool _loaded = false;
+
+  /// Validation with AniList has settled (confirmed or cleared). Only this
+  /// flag lets [restore] skip the network. It used to be set by
+  /// [loadSavedSession] too, so a page load read the token but never checked
+  /// it, and a fresh sign-in stayed "guest" until the user signed in again.
   bool _restored = false;
 
   /// The last validation attempt failed transiently, so the token is still
@@ -247,6 +253,8 @@ class AniListAuthRepository implements AuthRepository {
     _token = clean;
     _user = viewer;
     _needsValidation = false;
+    _loaded = true;
+    _restored = true;
     await _prefs.setString(tokenKey, clean);
     await _prefs.setString(
       userKey,
@@ -289,8 +297,8 @@ class AniListAuthRepository implements AuthRepository {
 
   @override
   void loadSavedSession() {
-    if (_restored) return;
-    _restored = true;
+    if (_loaded) return;
+    _loaded = true;
     _token = _prefs.getString(tokenKey) ?? _prefs.getString(legacyTokenKey);
     _user = _cachedUser();
     if (_token == null || _token!.isEmpty) {
@@ -301,44 +309,38 @@ class AniListAuthRepository implements AuthRepository {
   }
 
   Future<void> _restore() async {
-    final firstLoad = !_restored;
     loadSavedSession();
-    if (firstLoad && _token == null) {
+    final token = _token;
+    if (token == null) {
+      _needsValidation = false;
+      _restored = true;
       if (!_controller.isClosed) _controller.add(null);
       return;
     }
     // NOTE: the advertised `expires_in` deadline (tokenExpiryKey) is
     // deliberately NOT used to sign out here. AniList's implicit grant has
-    // no refresh token, so a token only dies when AniList says so — and
-    // clearing the session locally dropped the user to guest mode on the
-    // next page reload while the token was still perfectly valid. AniList
-    // is always asked instead: a genuinely dead token comes back as a 400
-    // from the `Viewer` query below and is cleared by the unauthorized
-    // branch of this method.
-
-    final token = _token;
-    if (token == null) {
-      _needsValidation = false;
-      return;
-    }
+    // no refresh token, so a token only dies when AniList says so. AniList
+    // is always asked instead: a dead token comes back as a 400 from the
+    // `Viewer` query and is cleared by the unauthorized branch below.
     try {
       final viewer = await _fetchViewer(token);
       if (_token != token) return; // signed out / replaced while waiting.
       _user = viewer;
       _needsValidation = false;
+      _restored = true;
       await _prefs.setString(userKey, jsonEncode(viewer.toJson()));
     } on AppException catch (error) {
       if (_token != token) return;
       if (error.kind == ErrorKind.unauthorized) {
-        // Expired/revoked token — drop it and stay in guest mode.
+        // Expired/revoked token: drop it and stay in guest mode.
+        _restored = true;
         await signOut();
         return;
       }
       // Network/rate-limit/server: keep any cached profile so the UI still
       // shows who is signed in, and remember that the token is unconfirmed.
-      // Unlike before, this does NOT end the attempt for good: restore() can
-      // be called again (the auth provider retries with backoff, and the
-      // profile page offers a retry button).
+      // _restored stays false, so restore() runs again (the auth provider
+      // retries with backoff, and the profile page offers a retry button).
       _needsValidation = true;
     }
     if (!_controller.isClosed) _controller.add(_user);
