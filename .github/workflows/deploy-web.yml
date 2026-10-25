@@ -29,6 +29,10 @@ jobs:
 
       - run: flutter analyze
 
+      # Guards the auth/session regressions (browser refresh, rate-limited
+      # validation, stale profile snapshot) before anything is deployed.
+      - run: flutter test
+
       # Project sites live under /<repo>/, so the base href must match the
       # repo name exactly (including case). Using the event repo name keeps
       # forks working without editing this file. Keep both slashes.
