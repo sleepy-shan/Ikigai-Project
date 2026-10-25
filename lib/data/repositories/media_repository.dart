@@ -592,7 +592,9 @@ class MediaRepository {
     final seen = <int>{};
     final items = <Media>[];
     for (var upstream = 1; upstream <= _staffUpstreamPages; upstream++) {
-      final data = await _client.query(kStaffWorksQuery, {
+      // Goes through _request so a staff page that is already on the wire
+      // (two widgets opening the same person) is shared, not fetched twice.
+      final data = await _request('staff:$id:$upstream', kStaffWorksQuery, {
         'id': id,
         'page': upstream,
         'perPage': _maxPerPage,

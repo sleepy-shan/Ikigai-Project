@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme/app_scroll.dart';
 import '../../core/theme/design_tokens.dart';
 import '../../core/utils/app_exception.dart';
+import '../../core/utils/external_link.dart';
 import '../../core/utils/formatters.dart';
 import '../../data/models/media.dart';
 import '../../data/models/media_entry.dart';
@@ -475,9 +476,9 @@ class _Overview extends StatelessWidget {
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
             onPressed: () {
-              final url = media.siteUrl;
-              if (url != null && url.isNotEmpty) {
-                launchUrl(Uri.parse(url), webOnlyWindowName: '_blank');
+              final uri = safeExternalUri(media.siteUrl);
+              if (uri != null) {
+                launchUrl(uri, webOnlyWindowName: '_blank');
               }
             },
             icon: const Icon(Icons.open_in_new, size: 16),
