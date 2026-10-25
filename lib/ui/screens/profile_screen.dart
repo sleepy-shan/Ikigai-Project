@@ -36,9 +36,16 @@ class ProfileScreen extends ConsumerWidget {
     final authAsync = ref.watch(authStateProvider);
     final user = authAsync.value;
     final profileAsync = user == null ? null : ref.watch(viewerProfileProvider);
-    final ViewerProfile? profile = profileAsync?.value;
+    // The fresh copy wins once it has arrived; until then (and when the
+    // request fails) the snapshot saved on the last visit keeps the page
+    // populated, so a reload never shows empty statistics panels.
+    final snapshot = user == null
+        ? null
+        : ref.watch(viewerProfileSnapshotProvider);
+    final ViewerProfile? profile = profileAsync?.value ?? snapshot;
     // A failed statistics request used to be invisible (`.value` is null on
     // error), leaving empty "—" panels with no message and no way to retry.
+    // Only reported when there is nothing at all to show.
     final profileFailed =
         profileAsync != null && profileAsync.hasError && profile == null;
     // A saved token exists but AniList has not confirmed it yet: that is

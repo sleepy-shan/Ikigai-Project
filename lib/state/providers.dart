@@ -64,6 +64,12 @@ final authStateProvider = StreamProvider<AuthUser?>((ref) async* {
 
   ref.onDispose(() => retryTimer?.cancel());
 
+  // Show the saved session straight away. A page reload must be able to say
+  // who is signed in without waiting for AniList — the validation below runs
+  // underneath and corrects the value if the token turns out to be dead.
+  repo.loadSavedSession();
+  yield repo.currentUser;
+
   try {
     await repo.restore();
   } on Object {

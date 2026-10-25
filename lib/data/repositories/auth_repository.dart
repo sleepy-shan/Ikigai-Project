@@ -58,6 +58,14 @@ abstract interface class AuthRepository {
   /// early; once a run has settled it is a no-op.
   Future<void> restore();
 
+  /// Populates [currentUser] from local storage **without** touching the
+  /// network.
+  ///
+  /// A page reload must be able to say who is signed in immediately, while
+  /// [restore] validates the token in the background. Calling it more than
+  /// once does nothing, and calling [restore] runs it automatically.
+  void loadSavedSession();
+
   /// True while a saved token exists that AniList has not confirmed yet
   /// because the last validation attempt failed transiently.
   bool get needsValidation;
@@ -108,9 +116,12 @@ class AniListAuthRepository implements AuthRepository {
   static const String tokenKey = 'ikigai.anilist.token';
   static const String userKey = 'ikigai.anilist.user';
 
-  /// Epoch milliseconds at which the saved token stops being valid, from the
-  /// redirect's `expires_in`. Lets an expired token be dropped up front rather
-  /// than discovered by a failed request.
+  /// Epoch milliseconds at which AniList said the token would stop being
+  /// valid, from the redirect's `expires_in`.
+  ///
+  /// Informational only: it is written on sign-in so the session records what
+  /// the server advertised, but it never decides whether the user is signed
+  /// in — see [_restore].
   static const String tokenExpiryKey = 'ikigai.anilist.tokenExpiresAt';
 
   /// Epoch milliseconds of the last "Sign in with AniList" tap in this
@@ -123,6 +134,13 @@ class AniListAuthRepository implements AuthRepository {
   // Pre-rebrand keys — read once for migration, new writes use ikigai.*.
   static const String legacyTokenKey = 'sandwich.anilist.token';
   static const String legacyUserKey = 'sandwich.anilist.user';
+
+  /// Key of the persisted profile-statistics snapshot for [userId].
+  ///
+  /// The snapshot lets the profile page paint instantly on a reload (before
+  /// AniList has answered); it lives beside the session so [signOut] can drop
+  /// it together with the token.
+  static String profileSnapshotKey(int userId) => 'ikigai.profile.$userId';
 
   final SharedPreferences _prefs;
   final AniListClient _client;
@@ -248,6 +266,7 @@ class AniListAuthRepository implements AuthRepository {
 
   @override
   Future<void> signOut() async {
+    final userId = _user?.id;
     _token = null;
     _user = null;
     _needsValidation = false;
@@ -256,6 +275,7 @@ class AniListAuthRepository implements AuthRepository {
     await _prefs.remove(tokenExpiryKey);
     await _prefs.remove(legacyTokenKey);
     await _prefs.remove(legacyUserKey);
+    if (userId != null) await _prefs.remove(profileSnapshotKey(userId));
     if (!_controller.isClosed) _controller.add(null);
   }
 
@@ -267,26 +287,34 @@ class AniListAuthRepository implements AuthRepository {
     return _restoring ??= _restore().whenComplete(() => _restoring = null);
   }
 
-  Future<void> _restore() async {
-    if (!_restored) {
-      _restored = true;
-      _token = _prefs.getString(tokenKey) ?? _prefs.getString(legacyTokenKey);
-      _user = _cachedUser();
-      if (_token == null || _token!.isEmpty) {
-        _token = null;
-        _user = null;
-        _needsValidation = false;
-        if (!_controller.isClosed) _controller.add(null);
-        return;
-      }
-      final expiresAtMs = _prefs.getInt(tokenExpiryKey);
-      if (expiresAtMs != null &&
-          DateTime.now().millisecondsSinceEpoch >= expiresAtMs) {
-        // Known to be expired already: no request needed to find out.
-        await signOut();
-        return;
-      }
+  @override
+  void loadSavedSession() {
+    if (_restored) return;
+    _restored = true;
+    _token = _prefs.getString(tokenKey) ?? _prefs.getString(legacyTokenKey);
+    _user = _cachedUser();
+    if (_token == null || _token!.isEmpty) {
+      _token = null;
+      _user = null;
+      _needsValidation = false;
     }
+  }
+
+  Future<void> _restore() async {
+    final firstLoad = !_restored;
+    loadSavedSession();
+    if (firstLoad && _token == null) {
+      if (!_controller.isClosed) _controller.add(null);
+      return;
+    }
+    // NOTE: the advertised `expires_in` deadline (tokenExpiryKey) is
+    // deliberately NOT used to sign out here. AniList's implicit grant has
+    // no refresh token, so a token only dies when AniList says so — and
+    // clearing the session locally dropped the user to guest mode on the
+    // next page reload while the token was still perfectly valid. AniList
+    // is always asked instead: a genuinely dead token comes back as a 400
+    // from the `Viewer` query below and is cleared by the unauthorized
+    // branch of this method.
 
     final token = _token;
     if (token == null) {

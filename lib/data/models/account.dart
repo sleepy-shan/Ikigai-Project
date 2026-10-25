@@ -33,6 +33,16 @@ class GenreStat {
 
   final String genre;
   final int count;
+
+  Map<String, Object?> toJson() => {'genre': genre, 'count': count};
+
+  static GenreStat? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final genre = raw['genre'];
+    final count = raw['count'];
+    if (genre is! String || count is! num) return null;
+    return GenreStat(genre: genre, count: count.toInt());
+  }
 }
 
 /// A section of the signed-in user's AniList **anime** list.
@@ -301,5 +311,71 @@ class ViewerProfile {
         GenreStat(genre: entry.key, count: entry.value),
     ]..sort((a, b) => b.count.compareTo(a.count));
     return list;
+  }
+
+  /// Serialization for the snapshot kept in local storage, so a page reload
+  /// can paint the statistics panels before AniList answers.
+  Map<String, Object?> toJson() => {
+    'name': name,
+    'avatarUrl': avatarUrl,
+    'bannerUrl': bannerUrl,
+    'totalCount': totalCount,
+    'watching': watching,
+    'completed': completed,
+    'planning': planning,
+    'paused': paused,
+    'dropped': dropped,
+    'rewatching': rewatching,
+    'favourites': favourites,
+    'episodesWatched': episodesWatched,
+    'minutesWatched': minutesWatched,
+    'meanScore': meanScore,
+    'mangaCount': mangaCount,
+    'chaptersRead': chaptersRead,
+    'volumesRead': volumesRead,
+    'mangaMeanScore': mangaMeanScore,
+    'animeGenres': [for (final stat in animeGenres) stat.toJson()],
+    'mangaGenres': [for (final stat in mangaGenres) stat.toJson()],
+  };
+
+  /// Decodes [json] written by [toJson]; null when it is unusable.
+  static ViewerProfile? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final name = json['name'];
+    if (name is! String || name.isEmpty) return null;
+    int? asInt(Object? value) => value is num ? value.toInt() : null;
+    double? asDouble(Object? value) => value is num ? value.toDouble() : null;
+    List<GenreStat> genres(Object? value) {
+      if (value is! List) return const [];
+      final result = <GenreStat>[];
+      for (final entry in value) {
+        final stat = GenreStat.fromJson(entry);
+        if (stat != null) result.add(stat);
+      }
+      return result;
+    }
+
+    return ViewerProfile(
+      name: name,
+      avatarUrl: json['avatarUrl'] as String?,
+      bannerUrl: json['bannerUrl'] as String?,
+      totalCount: asInt(json['totalCount']) ?? 0,
+      watching: asInt(json['watching']) ?? 0,
+      completed: asInt(json['completed']) ?? 0,
+      planning: asInt(json['planning']) ?? 0,
+      paused: asInt(json['paused']) ?? 0,
+      dropped: asInt(json['dropped']) ?? 0,
+      rewatching: asInt(json['rewatching']) ?? 0,
+      favourites: asInt(json['favourites']) ?? 0,
+      episodesWatched: asInt(json['episodesWatched']),
+      minutesWatched: asInt(json['minutesWatched']),
+      meanScore: asDouble(json['meanScore']),
+      mangaCount: asInt(json['mangaCount']) ?? 0,
+      chaptersRead: asInt(json['chaptersRead']),
+      volumesRead: asInt(json['volumesRead']),
+      mangaMeanScore: asDouble(json['mangaMeanScore']),
+      animeGenres: genres(json['animeGenres']),
+      mangaGenres: genres(json['mangaGenres']),
+    );
   }
 }

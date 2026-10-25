@@ -122,6 +122,34 @@ class MediaRepository {
 
   void clearCache() => _cache.clear();
 
+  /// Requests currently on the wire, keyed the same way as the cache.
+  ///
+  /// Several widgets routinely ask for the same page at the same moment (the
+  /// home rails and the spotlight carousel share the trending query; the
+  /// profile page asks for statistics, notifications and activity in one
+  /// frame). Sharing one in-flight future per key turns those races into a
+  /// single HTTP request, which matters against AniList's 90 req/min budget.
+  final Map<String, Future<Map<String, dynamic>>> _inflight = {};
+
+  /// Runs [document] once per [key] even when callers race for the same page.
+  ///
+  /// Callers still get their own future, but every one of them resolves with
+  /// the single upstream response.
+  Future<Map<String, dynamic>> _request(
+    String key,
+    String document,
+    Map<String, dynamic> variables, {
+    String? token,
+  }) {
+    final pending = _inflight[key];
+    if (pending != null) return pending;
+    final request = _client.query(document, variables, token: token);
+    _inflight[key] = request;
+    return request.whenComplete(() {
+      if (identical(_inflight[key], request)) _inflight.remove(key);
+    });
+  }
+
   /// Trending rail for the home page.
   Future<MediaPage> trending({
     MediaType type = MediaType.anime,
@@ -131,7 +159,7 @@ class MediaRepository {
     final key = 'trending:${type.name}:$page:$perPage';
     final cached = _get<MediaPage>(key);
     if (cached != null) return cached;
-    final data = await _client.query(trendingQuery(detail: false), {
+    final data = await _request(key, trendingQuery(detail: false), {
       'page': page,
       'perPage': perPage,
       'type': type.anilistValue,
@@ -171,7 +199,7 @@ class MediaRepository {
     // Lists use the light selection (relations/recommendations make a
     // 24-item query far too slow on AniList); the detail page fetches
     // those fields for a single title by id.
-    final data = await _client.query(browseQuery(detail: false), variables);
+    final data = await _request(key, browseQuery(detail: false), variables);
     final result = _page(data, query.page);
     // An empty page that still claims more results is a degraded API
     // response, not a real "no results" — don't cache it or filters and
@@ -185,7 +213,7 @@ class MediaRepository {
     final key = 'detail:$id';
     final cached = _get<Media>(key);
     if (cached != null) return cached;
-    final data = await _client.query(kMediaDetailQuery, {'id': id});
+    final data = await _request(key, kMediaDetailQuery, {'id': id});
     final media = AniListMapper.single(data['Media']);
     if (media == null) {
       throw AppException(ErrorKind.notFound, 'Title $id is unavailable');
@@ -245,7 +273,7 @@ class MediaRepository {
     final key = 'airing:$from:$to:$page:$perPage';
     final cached = _get<_AiringPage>(key);
     if (cached != null) return cached;
-    final data = await _client.query(kAiringScheduleQuery, {
+    final data = await _request(key, kAiringScheduleQuery, {
       'page': page,
       'perPage': perPage,
       'airingAt_greater': from,
@@ -283,7 +311,7 @@ class MediaRepository {
       final key = 'mangaReleases:$greater:$lesser:$page';
       var result = _get<MediaPage>(key);
       if (result == null) {
-        final data = await _client.query(kMangaReleasesQuery, {
+        final data = await _request(key, kMangaReleasesQuery, {
           'page': page,
           'perPage': _maxPerPage,
           'startDate_greater': greater,
@@ -320,7 +348,7 @@ class MediaRepository {
     final key = 'characters:${trimmed.toLowerCase()}:$page:$perPage';
     final cached = _get<CharacterPage>(key);
     if (cached != null) return cached;
-    final data = await _client.query(kCharacterSearchQuery, {
+    final data = await _request(key, kCharacterSearchQuery, {
       'page': page,
       'perPage': perPage,
       if (trimmed.isNotEmpty) 'search': trimmed,
@@ -346,7 +374,7 @@ class MediaRepository {
     final key = 'staff:${trimmed.toLowerCase()}:$page:$perPage';
     final cached = _get<StaffPage>(key);
     if (cached != null) return cached;
-    final data = await _client.query(kStaffSearchQuery, {
+    final data = await _request(key, kStaffSearchQuery, {
       'page': page,
       'perPage': perPage,
       if (trimmed.isNotEmpty) 'search': trimmed,
@@ -372,7 +400,7 @@ class MediaRepository {
     final key = 'studios:${trimmed.toLowerCase()}:$page:$perPage';
     final cached = _get<StudioPage>(key);
     if (cached != null) return cached;
-    final data = await _client.query(kStudioSearchQuery, {
+    final data = await _request(key, kStudioSearchQuery, {
       'page': page,
       'perPage': perPage,
       if (trimmed.isNotEmpty) 'search': trimmed,
@@ -397,7 +425,7 @@ class MediaRepository {
     final key = 'studioWorks:$id:$page:$perPage';
     final cached = _get<PersonWorks>(key);
     if (cached != null) return cached;
-    final data = await _client.query(kStudioWorksQuery, {
+    final data = await _request(key, kStudioWorksQuery, {
       'id': id,
       'page': page,
       'perPage': perPage,
@@ -411,20 +439,39 @@ class MediaRepository {
   }
 
   /// The signed-in user's recent title notifications (needs an AniList
-  /// token, so results are never cached).
+  /// token, so the key is scoped to the account that asked for them).
   Future<List<UserNotification>> notifications({
+    required int userId,
     required String token,
     int perPage = 30,
   }) async {
-    final data = await _client.query(kNotificationsQuery, {
-      'perPage': perPage,
-    }, token: token);
-    return AniListMapper.notifications(_pageMap(data['Page'])['notifications']);
+    final key = 'notifications:$userId:$perPage';
+    final cached = _get<List<UserNotification>>(key);
+    if (cached != null) return cached;
+    final data = await _request(key, kNotificationsQuery, {'perPage': perPage},
+        token: token);
+    final result =
+        AniListMapper.notifications(_pageMap(data['Page'])['notifications']);
+    // An empty page is ambiguous (genuinely nothing new, or a degraded
+    // response), so only results with content are cached.
+    if (result.isNotEmpty) _put(key, result);
+    return result;
   }
 
   /// Profile header and anime/manga statistics for the signed-in user.
-  Future<ViewerProfile> viewerProfile({required String token}) async {
-    final data = await _client.query(
+  ///
+  /// Cached for the cache TTL: it is the first thing the profile page shows
+  /// after a reload, and refetching it on every visit spent the request
+  /// budget on data that changes slowly.
+  Future<ViewerProfile> viewerProfile({
+    required int userId,
+    required String token,
+  }) async {
+    final key = 'viewerProfile:$userId';
+    final cached = _get<ViewerProfile>(key);
+    if (cached != null) return cached;
+    final data = await _request(
+      key,
       kViewerProfileQuery,
       const <String, dynamic>{},
       token: token,
@@ -436,25 +483,32 @@ class MediaRepository {
         'AniList did not return a profile for this account.',
       );
     }
+    _put(key, result);
     return result;
   }
 
   /// One section of the user's AniList anime list.
   ///
   /// [status] is a `MediaListStatus` wire value (for example `CURRENT`); pass
-  /// null for the whole collection. Never cached — the list is private and
-  /// changes as the user tracks titles.
+  /// null for the whole collection. Cached for the cache TTL and keyed by
+  /// account, so switching sections or reloading the page shows the list
+  /// instantly instead of re-downloading the same collection.
   Future<List<AccountListEntry>> accountList({
     required int userId,
     required String token,
     String? status,
   }) async {
-    final data = await _client.query(kMediaListCollectionQuery, {
+    final key = 'accountList:$userId:${status ?? 'ALL'}';
+    final cached = _get<List<AccountListEntry>>(key);
+    if (cached != null) return cached;
+    final data = await _request(key, kMediaListCollectionQuery, {
       'userId': userId,
       'type': MediaType.anime.anilistValue,
       'status': ?status,
     }, token: token);
-    return AniListMapper.accountListEntries(data['MediaListCollection']);
+    final result = AniListMapper.accountListEntries(data['MediaListCollection']);
+    if (result.isNotEmpty) _put(key, result);
+    return result;
   }
 
   /// The user's favourited anime (separate from their list statuses).
@@ -464,12 +518,17 @@ class MediaRepository {
     int page = 1,
     int perPage = 50,
   }) async {
-    final data = await _client.query(kFavouriteAnimeQuery, {
+    final key = 'favourites:$userId:$page:$perPage';
+    final cached = _get<MediaPage>(key);
+    if (cached != null) return cached;
+    final data = await _request(key, kFavouriteAnimeQuery, {
       'userId': userId,
       'page': page,
       'perPage': perPage,
     }, token: token);
-    return AniListMapper.favouriteAnime(data['User'], page);
+    final result = AniListMapper.favouriteAnime(data['User'], page);
+    if (result.items.isNotEmpty) _put(key, result);
+    return result;
   }
 
   /// The user's recent AniList activity (list updates, posts, messages).
@@ -478,11 +537,16 @@ class MediaRepository {
     required String token,
     int perPage = 12,
   }) async {
-    final data = await _client.query(kViewerActivityQuery, {
+    final key = 'activities:$userId:$perPage';
+    final cached = _get<List<UserActivity>>(key);
+    if (cached != null) return cached;
+    final data = await _request(key, kViewerActivityQuery, {
       'userId': userId,
       'perPage': perPage,
     }, token: token);
-    return AniListMapper.activities(data['Page']);
+    final result = AniListMapper.activities(data['Page']);
+    if (result.isNotEmpty) _put(key, result);
+    return result;
   }
 
   /// Upstream page size and depth used to assemble one staff member's credits.
@@ -568,7 +632,7 @@ class MediaRepository {
     final key = 'characterWorks:$id:$page:$perPage';
     final cached = _get<PersonWorks>(key);
     if (cached != null) return cached;
-    final data = await _client.query(kCharacterWorksQuery, {
+    final data = await _request(key, kCharacterWorksQuery, {
       'id': id,
       'page': page,
       'perPage': perPage,

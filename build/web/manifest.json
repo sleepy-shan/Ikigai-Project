@@ -3,7 +3,7 @@
     "short_name": "Ikigai",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#131216",
+    "background_color": "#0B1212",
     "theme_color": "#0E7C6B",
     "description": "Ikigai - discover and track anime & manga",
     "orientation": "portrait-primary",

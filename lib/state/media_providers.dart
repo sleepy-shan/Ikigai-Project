@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/anilist/anilist_client.dart';
@@ -5,6 +7,7 @@ import '../data/models/account.dart';
 import '../data/models/airing_schedule.dart';
 import '../data/models/media.dart';
 import '../data/models/people.dart';
+import '../data/repositories/auth_repository.dart';
 import '../data/repositories/media_repository.dart';
 import 'providers.dart';
 
@@ -155,17 +158,54 @@ final notificationsProvider =
   if (user == null) return const [];
   final token = ref.read(authRepositoryProvider).accessToken;
   if (token == null) return const [];
-  return ref.watch(mediaRepositoryProvider).notifications(token: token);
+  return ref.watch(mediaRepositoryProvider)
+      .notifications(userId: user.id, token: token);
+});
+
+/// Last profile statistics this browser saved, so a reload paints the
+/// profile panels immediately instead of waiting for AniList.
+///
+/// Keyed by account (a different user never sees it) and cleared together
+/// with the session on sign-out.
+final viewerProfileSnapshotProvider = Provider<ViewerProfile?>((ref) {
+  final prefs = ref.watch(sharedPreferencesProvider);
+  final user = ref.watch(authStateProvider).value;
+  if (user == null) return null;
+  final raw = prefs.getString(
+    AniListAuthRepository.profileSnapshotKey(user.id),
+  );
+  if (raw == null || raw.isEmpty) return null;
+  try {
+    return ViewerProfile.fromJson(jsonDecode(raw));
+  } on Object {
+    return null; // Corrupt snapshot: ignore and refetch.
+  }
 });
 
 /// Profile header + anime stats for the signed-in user (null for guests).
+///
+/// A successful fetch is written back to local storage (see
+/// [viewerProfileSnapshotProvider]) so the next cold start shows it at once
+/// and a failed refresh degrades to last-known data rather than an empty page.
 final viewerProfileProvider =
     FutureProvider.autoDispose<ViewerProfile?>((ref) async {
   final user = await ref.watch(authStateProvider.future);
   if (user == null) return null;
   final token = ref.read(authRepositoryProvider).accessToken;
   if (token == null) return null;
-  return ref.watch(mediaRepositoryProvider).viewerProfile(token: token);
+  final profile = await ref
+      .watch(mediaRepositoryProvider)
+      .viewerProfile(userId: user.id, token: token);
+  try {
+    await ref.read(sharedPreferencesProvider).setString(
+      AniListAuthRepository.profileSnapshotKey(user.id),
+      jsonEncode(profile.toJson()),
+    );
+  } on Object {
+    // Storage may be full or blocked; the snapshot is an optimization, so a
+    // failure here must not fail the request that just succeeded.
+  }
+  return profile;
 });
 
 /// One section of the signed-in user's AniList anime list (empty for guests).
