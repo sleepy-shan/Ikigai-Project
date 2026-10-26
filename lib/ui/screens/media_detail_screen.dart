@@ -9,6 +9,7 @@ import '../../core/utils/external_link.dart';
 import '../../core/utils/formatters.dart';
 import '../../data/models/media.dart';
 import '../../data/models/media_entry.dart';
+import '../../state/history_controller.dart';
 import '../../state/media_providers.dart';
 import '../../state/my_lists_controller.dart';
 import '../components/poster_card.dart';
@@ -59,13 +60,41 @@ class _DetailError extends ConsumerWidget {
   }
 }
 
-class _DetailBody extends ConsumerWidget {
+class _DetailBody extends ConsumerStatefulWidget {
   const _DetailBody({required this.media});
 
   final Media media;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_DetailBody> createState() => _DetailBodyState();
+}
+
+class _DetailBodyState extends ConsumerState<_DetailBody> {
+  @override
+  void initState() {
+    super.initState();
+    _recordView();
+  }
+
+  @override
+  void didUpdateWidget(_DetailBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.media.id != widget.media.id) _recordView();
+  }
+
+  /// Adds this title to History. Deferred a frame so provider state is not
+  /// changed while the tree is still building.
+  void _recordView() {
+    final media = widget.media;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(historyControllerProvider.notifier).record(media);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final media = widget.media;
     // `select` on entries only — filter/sort changes do not rebuild detail.
     final entry = ref.watch(
       myListsControllerProvider.select((s) {
