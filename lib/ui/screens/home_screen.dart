@@ -62,7 +62,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               title: 'Continue watching / reading',
               subtitle: 'Jump back into what you were tracking',
               eyebrow: 'Pick up',
-              actionLabel: 'My List',
+              actionLabel: 'Watchlist',
               actionPath: Routes.lists,
             ),
           ),

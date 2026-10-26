@@ -7,6 +7,7 @@ import '../../data/models/media.dart';
 import '../layout/app_shell.dart';
 import '../screens/browse_screen.dart';
 import '../screens/calendar_screen.dart';
+import '../screens/history_screen.dart';
 import '../screens/home_screen.dart';
 import '../screens/my_lists_screen.dart';
 import '../screens/notifications_screen.dart';
@@ -23,6 +24,7 @@ abstract final class Routes {
   static const manga = '/manga';
   static const calendar = '/calendar';
   static const lists = '/lists';
+  static const history = '/history';
   static const search = '/search';
   static const profile = '/profile';
   static const notifications = '/notifications';
@@ -87,6 +89,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: Routes.lists,
             builder: (context, state) => const MyListsScreen(),
+          ),
+          GoRoute(
+            path: Routes.history,
+            builder: (context, state) => const HistoryScreen(),
           ),
           GoRoute(
             path: Routes.search,

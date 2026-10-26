@@ -6,22 +6,28 @@ import '../../core/theme/design_tokens.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../state/providers.dart';
 import '../router/app_router.dart';
+import '../screens/settings_dialog.dart';
 import 'sign_in_dialog.dart';
 
 /// Top-bar account control.
 ///
-/// - Guests see a **Sign in** button (labelled, or an icon on narrow bars)
-///   that starts the AniList OAuth flow.
-/// - Signed-in users see their AniList avatar; tapping it opens a menu with
-///   **Profile** and **Sign out**.
+/// - **Desktop, guest:** a **Sign in** button (icon only on tighter bars).
+/// - **Desktop, signed in:** the AniList avatar; its menu has **Profile** and
+///   **Sign out**. Settings and History live in the sidebar there.
+/// - **Mobile:** the avatar (or a person icon for guests). The menu has
+///   **Settings**, **History** and **Sign out** (**Sign in** for guests),
+///   because phones have no sidebar. The name header opens the profile.
 ///
 /// Keeping it here (rather than on the profile page) means sign in / sign out
 /// is reachable from every screen and there is a single source of truth.
 class AccountButton extends ConsumerWidget {
-  const AccountButton({this.iconOnly = false, super.key});
+  const AccountButton({this.iconOnly = false, this.mobile = false, super.key});
 
-  /// When true the guest button collapses to an icon to save bar space.
+  /// When true the desktop guest button collapses to an icon to save space.
   final bool iconOnly;
+
+  /// Phone layout: the menu carries Settings and History.
+  final bool mobile;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -47,6 +53,7 @@ class AccountButton extends ConsumerWidget {
           ),
         );
       }
+      if (mobile) return const _GuestMenu();
       if (iconOnly) {
         return IconButton(
           tooltip: 'Sign in with AniList',
@@ -64,14 +71,59 @@ class AccountButton extends ConsumerWidget {
       );
     }
 
-    return _UserMenu(user: user);
+    return _UserMenu(user: user, mobile: mobile);
   }
 }
 
+/// Phone menu for guests: the same shortcuts, with Sign in at the end.
+class _GuestMenu extends StatelessWidget {
+  const _GuestMenu();
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<String>(
+      tooltip: 'Account',
+      icon: const Icon(Icons.account_circle_outlined),
+      offset: const Offset(0, 46),
+      onSelected: (value) {
+        switch (value) {
+          case 'settings':
+            showSettingsDialog(context);
+          case 'history':
+            context.go(Routes.history);
+          case 'signin':
+            showSignInDialog(context);
+        }
+      },
+      itemBuilder: (context) => [
+        _menuRow('settings', Icons.settings_outlined, 'Settings'),
+        _menuRow('history', Icons.history_rounded, 'History'),
+        const PopupMenuDivider(),
+        _menuRow('signin', Icons.login_rounded, 'Sign in'),
+      ],
+    );
+  }
+}
+
+/// One icon + label row in an account popup menu.
+PopupMenuItem<String> _menuRow(String value, IconData icon, String label) {
+  return PopupMenuItem<String>(
+    value: value,
+    child: Row(
+      children: [
+        Icon(icon, size: 18),
+        const SizedBox(width: Tokens.space12),
+        Text(label),
+      ],
+    ),
+  );
+}
+
 class _UserMenu extends ConsumerWidget {
-  const _UserMenu({required this.user});
+  const _UserMenu({required this.user, required this.mobile});
 
   final AuthUser user;
+  final bool mobile;
 
   Future<void> _signOut(BuildContext context, WidgetRef ref) async {
     await ref.read(authRepositoryProvider).signOut();
@@ -93,13 +145,17 @@ class _UserMenu extends ConsumerWidget {
         switch (value) {
           case 'profile':
             context.go(Routes.profile);
+          case 'settings':
+            showSettingsDialog(context);
+          case 'history':
+            context.go(Routes.history);
           case 'signout':
             _signOut(context, ref);
         }
       },
       itemBuilder: (context) => [
         PopupMenuItem<String>(
-          enabled: false,
+          value: 'profile',
           height: 64,
           child: Row(
             children: [
@@ -132,26 +188,13 @@ class _UserMenu extends ConsumerWidget {
           ),
         ),
         const PopupMenuDivider(),
-        const PopupMenuItem<String>(
-          value: 'profile',
-          child: Row(
-            children: [
-              Icon(Icons.person_outline, size: 18),
-              SizedBox(width: Tokens.space12),
-              Text('Profile'),
-            ],
-          ),
-        ),
-        const PopupMenuItem<String>(
-          value: 'signout',
-          child: Row(
-            children: [
-              Icon(Icons.logout_rounded, size: 18),
-              SizedBox(width: Tokens.space12),
-              Text('Sign out'),
-            ],
-          ),
-        ),
+        if (mobile) ...[
+          _menuRow('settings', Icons.settings_outlined, 'Settings'),
+          _menuRow('history', Icons.history_rounded, 'History'),
+        ] else
+          _menuRow('profile', Icons.person_outline, 'Profile'),
+        const PopupMenuDivider(),
+        _menuRow('signout', Icons.logout_rounded, 'Sign out'),
       ],
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: Tokens.space4),

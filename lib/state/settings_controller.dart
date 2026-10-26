@@ -60,6 +60,26 @@ class AccentController extends Notifier<AppAccent> {
   }
 }
 
+/// Whether the desktop sidebar is collapsed to icons. Starts collapsed; after
+/// that it stays the way the user left it.
+class SidebarController extends Notifier<bool> {
+  static const _key = 'ikigai.sidebar.collapsed';
+
+  SharedPreferences get _prefs => ref.read(sharedPreferencesProvider);
+
+  @override
+  bool build() => _prefs.getBool(_key) ?? true;
+
+  Future<void> toggle() async {
+    state = !state;
+    await _prefs.setBool(_key, state);
+  }
+}
+
+final sidebarCollapsedProvider = NotifierProvider<SidebarController, bool>(
+  SidebarController.new,
+);
+
 final settingsControllerProvider =
     NotifierProvider<SettingsController, ThemePreference>(
       SettingsController.new,

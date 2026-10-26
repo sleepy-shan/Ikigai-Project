@@ -134,7 +134,7 @@ class _Header extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('My List', style: theme.textTheme.headlineMedium),
+                Text('Watchlist', style: theme.textTheme.headlineMedium),
                 AnimatedSwitcher(
                   duration: Tokens.durationMedium,
                   child: Text(

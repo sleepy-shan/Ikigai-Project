@@ -10,6 +10,7 @@ import '../../state/settings_controller.dart';
 import '../components/account_button.dart';
 import '../components/app_logo.dart';
 import '../components/search_field.dart';
+import '../components/theme_switch.dart';
 import '../router/app_router.dart';
 import '../screens/settings_dialog.dart';
 
@@ -23,7 +24,9 @@ class _Destination {
   final String path;
 }
 
-const List<_Destination> _destinations = [
+/// The five main destinations. Shown in the phone bottom bar and at the top
+/// of the desktop sidebar.
+const List<_Destination> _mainDestinations = [
   _Destination('Home', Icons.home_outlined, Icons.home_rounded, Routes.home),
   _Destination('Anime', Icons.movie_outlined, Icons.movie_rounded, Routes.anime),
   _Destination(
@@ -38,35 +41,50 @@ const List<_Destination> _destinations = [
     Icons.calendar_month_rounded,
     Routes.calendar,
   ),
+  _Destination(
+    'Watchlist',
+    Icons.bookmark_border_rounded,
+    Icons.bookmark_rounded,
+    Routes.lists,
+  ),
 ];
 
-/// Responsive app chrome with a calm lagoon look:
-/// soft teal background blobs, a docked hairline top bar on desktop
-/// (Linear/Vercel-style, not a floating pill) and a docked bottom tab
-/// bar on phones. Screens render inside [child].
+/// Sidebar-only destinations (phones reach these from the profile menu).
+const _Destination _historyDestination = _Destination(
+  'History',
+  Icons.history_rounded,
+  Icons.history_rounded,
+  Routes.history,
+);
+
+/// Responsive app chrome.
+///
+/// - **Desktop (>= 1000px):** top app bar (logo, search, theme, notifications,
+///   profile) with a collapsible sidebar under it.
+/// - **Phones (< 1000px):** the same top app bar and a bottom navigation bar.
+///
+/// Screens render inside [child].
 class AppShell extends ConsumerWidget {
   const AppShell({required this.child, super.key});
 
   final Widget child;
 
-  int _selectedIndex(BuildContext context) {
-    final location = GoRouterState.of(context).uri.path;
-    for (var i = 0; i < _destinations.length; i++) {
-      final path = _destinations[i].path;
-      if (path == Routes.home) {
-        if (location == Routes.home) return i;
-      } else if (location.startsWith(path)) {
-        return i;
-      }
+  /// Path of the destination the current location belongs to, or null on
+  /// pages that are not a destination (profile, search, a title's page).
+  String? _activePath(String location) {
+    if (location == Routes.home) return Routes.home;
+    for (final d in [..._mainDestinations, _historyDestination]) {
+      if (d.path != Routes.home && location.startsWith(d.path)) return d.path;
     }
-    return 0;
+    return null;
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final width = MediaQuery.sizeOf(context).width;
     final isCompact = width < Tokens.breakpointMedium;
-    final selectedIndex = _selectedIndex(context);
+    final location = GoRouterState.of(context).uri.path;
+    final activePath = _activePath(location);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     // Command-palette shortcut: "/" or Ctrl/Cmd+K jumps to search from
@@ -83,6 +101,13 @@ class AppShell extends ConsumerWidget {
       context.push(Routes.search);
     }
 
+    // Fade the new page in. Not an AnimatedSwitcher: that keeps the old page
+    // mounted next to the new one, and both contain the shell's navigator,
+    // which owns a GlobalKey — a "Duplicate GlobalKey" error.
+    final content = ClipRect(
+      child: _PageFade(key: ValueKey(location), child: child),
+    );
+
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.slash): goSearch,
@@ -94,67 +119,32 @@ class AppShell extends ConsumerWidget {
         extendBody: false,
         body: Stack(
           children: [
-            // ---- Aurora background --------------------------------------
             Positioned.fill(child: _AuroraBackground(isDark: isDark)),
-            // ---- Content -------------------------------------------------
-            // Desktop (>=1000px): top horizontal menu bar + content.
-            // Phones (<1000px): top utility bar + content + floating pill bar.
             Column(
               children: [
-                _GlassTopBar(
+                _TopBar(
                   isCompact: isCompact,
-                  selectedIndex: selectedIndex,
-                  onDestinationTap: (i) => context.go(_destinations[i].path),
                   onLogoTap: () => context.go(Routes.home),
                 ),
                 Expanded(
-                  child: ClipRect(
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 300),
-                      switchInCurve: Tokens.curveSmooth,
-                      switchOutCurve: Curves.easeIn,
-                      layoutBuilder: (current, previous) => Stack(
-                        alignment: Alignment.topCenter,
-                        children: [...previous, ?current],
-                      ),
-                      transitionBuilder: (child, animation) {
-                        final fade = CurvedAnimation(
-                          parent: animation,
-                          curve: Tokens.curveSmooth,
-                        );
-                        final slide =
-                            Tween<Offset>(
-                              begin: const Offset(0, 0.03),
-                              end: Offset.zero,
-                            ).animate(fade);
-                        final scale =
-                            Tween<double>(begin: 0.98, end: 1.0).animate(fade);
-                        return FadeTransition(
-                          opacity: fade,
-                          child: SlideTransition(
-                            position: slide,
-                            child: ScaleTransition(
-                              scale: scale,
-                              child: child,
-                            ),
-                          ),
-                        );
-                      },
-                      child: KeyedSubtree(
-                        key: ValueKey(GoRouterState.of(context).uri.path),
-                        child: child,
-                      ),
-                    ),
-                  ),
+                  child: isCompact
+                      ? content
+                      : Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _Sidebar(activePath: activePath),
+                            Expanded(child: content),
+                          ],
+                        ),
                 ),
               ],
             ),
           ],
         ),
         bottomNavigationBar: isCompact
-            ? _FloatingBottomBar(
-                selectedIndex: selectedIndex,
-                onTap: (i) => context.go(_destinations[i].path),
+            ? _BottomBar(
+                activePath: activePath,
+                onTap: (d) => context.go(d.path),
               )
             : null,
       ),
@@ -237,178 +227,71 @@ class _AuroraBackground extends StatelessWidget {
   }
 }
 
-/// Desktop horizontal nav: quiet text tabs with an underline indicator.
-///
-/// The active tab uses primary-colored icon + text and a short 20px
-/// underline bar; inactive tabs are ghost buttons with a subtle hover
-/// wash. No pill fill, gradient, or glow — calm by design. Collapses to
-/// icon-only when [iconOnly] is true so 1000–1240px viewports don't
-/// overflow.
-class _DesktopNav extends StatelessWidget {
-  const _DesktopNav({
-    required this.selectedIndex,
-    required this.onTap,
-    required this.iconOnly,
-  });
+/// Fades and nudges a page into place when it first appears.
+class _PageFade extends StatefulWidget {
+  const _PageFade({required this.child, super.key});
 
-  final int selectedIndex;
-  final ValueChanged<int> onTap;
-  final bool iconOnly;
+  final Widget child;
+
+  @override
+  State<_PageFade> createState() => _PageFadeState();
+}
+
+class _PageFadeState extends State<_PageFade>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 260),
+  )..forward();
+  late final Animation<double> _fade = CurvedAnimation(
+    parent: _controller,
+    curve: Tokens.curveSmooth,
+  );
+  late final Animation<Offset> _slide = Tween<Offset>(
+    begin: const Offset(0, 0.02),
+    end: Offset.zero,
+  ).animate(_fade);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (var i = 0; i < _destinations.length; i++)
-          _TopNavItem(
-            destination: _destinations[i],
-            selected: i == selectedIndex,
-            iconOnly: iconOnly,
-            onTap: () => onTap(i),
-          ),
-      ],
+    return FadeTransition(
+      opacity: _fade,
+      child: SlideTransition(position: _slide, child: widget.child),
     );
   }
 }
 
-class _TopNavItem extends StatefulWidget {
-  const _TopNavItem({
-    required this.destination,
-    required this.selected,
-    required this.iconOnly,
-    required this.onTap,
-  });
-
-  final _Destination destination;
-  final bool selected;
-  final bool iconOnly;
-  final VoidCallback onTap;
-
-  @override
-  State<_TopNavItem> createState() => _TopNavItemState();
-}
-
-class _TopNavItemState extends State<_TopNavItem> {
-  bool _hovering = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final selected = widget.selected;
-    final iconColor = selected ? scheme.primary : scheme.onSurfaceVariant;
-    final textColor = selected ? scheme.onSurface : scheme.onSurfaceVariant;
-    return Tooltip(
-      message: widget.destination.label,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hovering = true),
-        onExit: (_) => setState(() => _hovering = false),
-        child: GestureDetector(
-          onTap: widget.onTap,
-          child: AnimatedContainer(
-            duration: Tokens.durationFast,
-            curve: Tokens.curveSmooth,
-            margin: const EdgeInsets.symmetric(horizontal: 2),
-            padding: EdgeInsets.symmetric(
-              horizontal: widget.iconOnly ? 10 : 12,
-              vertical: 8,
-            ),
-            decoration: BoxDecoration(
-              color: _hovering && !selected
-                  ? scheme.surfaceContainerHighest.withValues(alpha: 0.7)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(Tokens.radiusMd),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      selected
-                          ? widget.destination.activeIcon
-                          : widget.destination.icon,
-                      size: 18,
-                      color: iconColor,
-                    ),
-                    if (!widget.iconOnly) ...[
-                      const SizedBox(width: 7),
-                      Text(
-                        widget.destination.label,
-                        style: TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: selected
-                              ? FontWeight.w700
-                              : FontWeight.w500,
-                          letterSpacing: 0,
-                          color: textColor,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 4),
-                AnimatedContainer(
-                  duration: Tokens.durationMedium,
-                  curve: Tokens.curveSmooth,
-                  height: 2.5,
-                  width: selected ? 20 : 0,
-                  decoration: BoxDecoration(
-                    color: scheme.primary,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Docked hairline top bar (no floating pill, square edges).
+/// App bar: logo, search, theme switch, notifications, profile.
 ///
-/// - Desktop (>=1000px): logo + underline tabs + search + actions.
-/// - Phones (<1000px): logo + search + actions (nav lives in the bottom bar).
-class _GlassTopBar extends ConsumerWidget {
-  const _GlassTopBar({
-    required this.isCompact,
-    required this.selectedIndex,
-    required this.onDestinationTap,
-    required this.onLogoTap,
-  });
+/// - Wide screens (>= 600px) show the search field in the middle.
+/// - Narrower screens show a search icon that opens the search page.
+class _TopBar extends StatelessWidget {
+  const _TopBar({required this.isCompact, required this.onLogoTap});
 
   final bool isCompact;
-  final int selectedIndex;
-  final ValueChanged<int> onDestinationTap;
   final VoidCallback onLogoTap;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final width = MediaQuery.sizeOf(context).width;
     final showSearchField = width >= Tokens.breakpointCompact;
-
-    // Desktop breakpoints: keep the single bar overflow-safe.
-    // 1000–1240: icon-only tabs + compact search.
-    // 1240+: full tabs + wider search.
-    final bool iconOnlyNav = width < 1240;
-    final bool showWordmark = isCompact || width >= 1120;
-    // The account button keeps its label only when there is clear room.
-    final bool accountIconOnly = width < 1240;
-    final double searchMaxWidth = width >= 1400
-        ? 460
-        : (width >= 1240 ? 340 : 260);
 
     return ClipRect(
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
         child: Container(
           height: Tokens.appBarHeight,
+          padding: EdgeInsets.symmetric(
+            horizontal: isCompact ? Tokens.space8 : Tokens.space16,
+          ),
           decoration: BoxDecoration(
             color: isDark
                 ? const Color(0xFF0E1515).withValues(alpha: 0.88)
@@ -422,82 +305,44 @@ class _GlassTopBar extends ConsumerWidget {
               ),
             ),
           ),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(
-                maxWidth: Tokens.maxContentWidth,
+          child: Row(
+            children: [
+              AppLogo(
+                size: 32,
+                showWordmark: !isCompact,
+                wordmarkScale: 0.95,
+                onTap: onLogoTap,
               ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: Tokens.space16,
-                ),
-                child: Row(
-                  children: [
-                    AppLogo(
-                      size: 32,
-                      showWordmark: showWordmark && !isCompact ? true : !isCompact,
-                      wordmarkScale: 0.95,
-                      onTap: onLogoTap,
+              if (showSearchField)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: Tokens.space16,
                     ),
-                    if (!isCompact) ...[
-                      const SizedBox(width: Tokens.space20),
-                      _DesktopNav(
-                        selectedIndex: selectedIndex,
-                        onTap: onDestinationTap,
-                        iconOnly: iconOnlyNav,
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 520),
+                        child: const _SearchField(),
                       ),
-                      const Spacer(),
-                      if (showSearchField)
-                        Flexible(
-                          flex: 2,
-                          child: Align(
-                            alignment: Alignment.centerRight,
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxWidth: searchMaxWidth,
-                              ),
-                              child: _SearchField(),
-                            ),
-                          ),
-                        ),
-                      const SizedBox(width: Tokens.space8),
-                    ] else ...[
-                      const SizedBox(width: Tokens.space16),
-                      if (showSearchField)
-                        Expanded(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 520),
-                            child: _SearchField(),
-                          ),
-                        )
-                      else
-                        const Spacer(),
-                      const Spacer(),
-                      if (!showSearchField)
-                        IconButton(
-                          tooltip: 'Search',
-                          icon: const Icon(Icons.search),
-                          onPressed: () => context.push(Routes.search),
-                        ),
-                    ],
-                    _ThemeToggle(compact: isCompact),
-                    _TopIcon(
-                      tooltip: 'Notifications',
-                      icon: Icons.notifications_none_outlined,
-                      onPressed: () => context.go(Routes.notifications),
                     ),
-                    // Profile lives in the account menu (avatar / Sign in),
-                    // so no separate header icon is needed.
-                    AccountButton(iconOnly: accountIconOnly),
-                    _TopIcon(
-                      tooltip: 'Settings',
-                      icon: Icons.settings_outlined,
-                      onPressed: () => showSettingsDialog(context),
-                    ),
-                  ],
+                  ),
+                )
+              else ...[
+                const Spacer(),
+                IconButton(
+                  tooltip: 'Search',
+                  icon: const Icon(Icons.search),
+                  onPressed: () => context.push(Routes.search),
                 ),
+              ],
+              ThemeSwitch(compact: isCompact),
+              IconButton(
+                tooltip: 'Notifications',
+                icon: const Icon(Icons.notifications_none_outlined),
+                onPressed: () => context.go(Routes.notifications),
               ),
-            ),
+              AccountButton(iconOnly: width < 1240, mobile: isCompact),
+            ],
           ),
         ),
       ),
@@ -505,27 +350,12 @@ class _GlassTopBar extends ConsumerWidget {
   }
 }
 
-class _TopIcon extends StatelessWidget {
-  const _TopIcon({
-    required this.tooltip,
-    required this.icon,
-    required this.onPressed,
-  });
-
-  final String tooltip;
-  final IconData icon;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(tooltip: tooltip, icon: Icon(icon), onPressed: onPressed);
-  }
-}
-
 /// Top-bar minimalist search. Submitting navigates to the search results
 /// route so the result is shareable via the URL. Visuals live in the
 /// shared [LensSearchField] so both search bars stay identical.
 class _SearchField extends StatefulWidget {
+  const _SearchField();
+
   @override
   State<_SearchField> createState() => _SearchFieldState();
 }
@@ -558,15 +388,200 @@ class _SearchFieldState extends State<_SearchField> {
   }
 }
 
-/// Docked bottom tab bar for phones — full-width hairline, square edges.
-class _FloatingBottomBar extends StatelessWidget {
-  const _FloatingBottomBar({
-    required this.selectedIndex,
+// ---------------------------------------------------------------------------
+// Desktop sidebar
+// ---------------------------------------------------------------------------
+
+const double _sidebarExpandedWidth = 232;
+const double _sidebarCollapsedWidth = 72;
+
+/// Desktop sidebar: Home, Anime, Manga, Calendar, Watchlist, History,
+/// Settings. Collapses to icons; the choice is remembered.
+class _Sidebar extends ConsumerWidget {
+  const _Sidebar({required this.activePath});
+
+  final String? activePath;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final collapsed = ref.watch(sidebarCollapsedProvider);
+
+    Widget item(_Destination d) => _SidebarItem(
+      icon: activePath == d.path ? d.activeIcon : d.icon,
+      label: d.label,
+      selected: activePath == d.path,
+      collapsed: collapsed,
+      onTap: () => context.go(d.path),
+    );
+
+    return AnimatedContainer(
+      duration: Tokens.durationMedium,
+      curve: Tokens.curveSmooth,
+      width: collapsed ? _sidebarCollapsedWidth : _sidebarExpandedWidth,
+      decoration: BoxDecoration(
+        color: isDark
+            ? const Color(0xFF0E1515).withValues(alpha: 0.72)
+            : Colors.white.withValues(alpha: 0.72),
+        border: Border(
+          right: BorderSide(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : theme.dividerColor,
+          ),
+        ),
+      ),
+      child: ClipRect(
+        child: Column(
+          children: [
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: Tokens.space12,
+                ),
+                children: [
+                  for (final d in _mainDestinations) item(d),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: Tokens.space8,
+                      vertical: Tokens.space8,
+                    ),
+                    child: Divider(height: 1),
+                  ),
+                  item(_historyDestination),
+                  _SidebarItem(
+                    icon: Icons.settings_outlined,
+                    label: 'Settings',
+                    selected: false,
+                    collapsed: collapsed,
+                    onTap: () => showSettingsDialog(context),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, Tokens.space12),
+              child: _SidebarItem(
+                icon: collapsed
+                    ? Icons.keyboard_double_arrow_right_rounded
+                    : Icons.keyboard_double_arrow_left_rounded,
+                label: 'Collapse',
+                tooltip: collapsed ? 'Expand sidebar' : 'Collapse sidebar',
+                selected: false,
+                collapsed: collapsed,
+                onTap: () =>
+                    ref.read(sidebarCollapsedProvider.notifier).toggle(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One sidebar row. The icon stays put while the sidebar animates; only the
+/// label fades, so collapsing never makes icons jump.
+class _SidebarItem extends StatelessWidget {
+  const _SidebarItem({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.collapsed,
     required this.onTap,
+    this.tooltip,
   });
 
-  final int selectedIndex;
-  final ValueChanged<int> onTap;
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final bool collapsed;
+  final VoidCallback onTap;
+
+  /// Overrides the collapsed-state tooltip (defaults to [label]).
+  final String? tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final iconColor = selected ? scheme.primary : scheme.onSurfaceVariant;
+    final textColor = selected ? scheme.onSurface : scheme.onSurfaceVariant;
+
+    final row = Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      onTap: onTap,
+      excludeSemantics: true,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Material(
+          color: selected
+              ? scheme.primary.withValues(alpha: 0.12)
+              : Colors.transparent,
+          animationDuration: Tokens.durationFast,
+          borderRadius: BorderRadius.circular(Tokens.radiusMd),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(Tokens.radiusMd),
+            onTap: onTap,
+            child: SizedBox(
+              height: 44,
+              child: Row(
+                children: [
+                  const SizedBox(width: 15),
+                  Icon(icon, size: 22, color: iconColor),
+                  Expanded(
+                    child: AnimatedOpacity(
+                      duration: Tokens.durationFast,
+                      opacity: collapsed ? 0 : 1,
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: Tokens.space12),
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.clip,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: selected
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                            color: textColor,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (!collapsed && tooltip == null) return row;
+    return Tooltip(
+      message: collapsed ? (tooltip ?? label) : tooltip!,
+      preferBelow: false,
+      child: row,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Phone bottom bar
+// ---------------------------------------------------------------------------
+
+/// Docked bottom navigation for phones: Home, Anime, Manga, Calendar,
+/// Watchlist.
+class _BottomBar extends StatelessWidget {
+  const _BottomBar({required this.activePath, required this.onTap});
+
+  final String? activePath;
+  final ValueChanged<_Destination> onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -578,7 +593,7 @@ class _FloatingBottomBar extends StatelessWidget {
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
           child: Container(
-            padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
+            padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
             decoration: BoxDecoration(
               color: isDark
                   ? const Color(0xFF0E1515).withValues(alpha: 0.92)
@@ -593,13 +608,14 @@ class _FloatingBottomBar extends StatelessWidget {
               ),
             ),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                for (var i = 0; i < _destinations.length; i++)
-                  _BottomItem(
-                    destination: _destinations[i],
-                    selected: i == selectedIndex,
-                    onTap: () => onTap(i),
+                for (final d in _mainDestinations)
+                  Expanded(
+                    child: _BottomItem(
+                      destination: d,
+                      selected: d.path == activePath,
+                      onTap: () => onTap(d),
+                    ),
                   ),
               ],
             ),
@@ -625,178 +641,46 @@ class _BottomItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final color = selected ? scheme.primary : scheme.onSurfaceVariant;
-    return GestureDetector(
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: destination.label,
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AnimatedContainer(
-              duration: Tokens.durationFast,
-              curve: Tokens.curveSmooth,
-              height: 3,
-              width: selected ? 20 : 0,
-              decoration: BoxDecoration(
-                color: scheme.primary,
-                borderRadius: BorderRadius.circular(2),
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AnimatedContainer(
+                duration: Tokens.durationFast,
+                curve: Tokens.curveSmooth,
+                height: 3,
+                width: selected ? 20 : 0,
+                decoration: BoxDecoration(
+                  color: scheme.primary,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
-            ),
-            const SizedBox(height: 5),
-            Icon(
-              selected ? destination.activeIcon : destination.icon,
-              size: 21,
-              color: color,
-            ),
-            const SizedBox(height: 2),
-            Text(
-              destination.label,
-              style: TextStyle(
+              const SizedBox(height: 5),
+              Icon(
+                selected ? destination.activeIcon : destination.icon,
+                size: 21,
                 color: color,
-                fontWeight:
-                    selected ? FontWeight.w700 : FontWeight.w500,
-                fontSize: 11,
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Light/dark theme control styled like the reference: an outlined pill
-/// holding a small toggle switch and a sun (brightness) glyph.
-///
-/// The switch reads as "light mode" — sliding it toward the sun turns light
-/// mode on; leaving it to the left keeps dark mode. Tapping anywhere on the
-/// pill flips the theme.
-class _ThemeToggle extends ConsumerWidget {
-  const _ThemeToggle({required this.compact});
-
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final mode = ref.watch(themeModeProvider);
-    final isDark =
-        mode == ThemeMode.dark ||
-        (mode == ThemeMode.system &&
-            MediaQuery.platformBrightnessOf(context) == Brightness.dark);
-    final isLight = !isDark;
-    final scheme = Theme.of(context).colorScheme;
-
-    void toggle() =>
-        ref.read(settingsControllerProvider.notifier).toggleDark(!isDark);
-
-    final trackHeight = compact ? 18.0 : 24.0;
-    final trackWidth = compact ? 32.0 : 46.0;
-    final knobSize = trackHeight - 6;
-    final gap = compact ? 6.0 : 8.0;
-    final iconSize = compact ? 14.0 : 18.0;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Tooltip(
-        message: isDark ? 'Switch to light mode' : 'Switch to dark mode',
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: toggle,
-            borderRadius: BorderRadius.circular(Tokens.radiusPill),
-            child: Container(
-              padding: EdgeInsets.fromLTRB(
-                compact ? 5 : 7,
-                compact ? 5 : 6,
-                compact ? 6 : 9,
-                compact ? 5 : 6,
-              ),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(Tokens.radiusPill),
-                border: Border.all(color: scheme.outlineVariant),
-                color: scheme.surfaceContainerHighest.withValues(alpha: 0.30),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _MiniSwitch(
-                    value: isLight,
-                    width: trackWidth,
-                    height: trackHeight,
-                    knob: knobSize,
-                    trackOn: scheme.primary,
-                    trackOff: scheme.surfaceContainerHighest,
-                    knobOn: scheme.onPrimary,
-                    knobOff: scheme.onSurface,
-                  ),
-                  SizedBox(width: gap),
-                  Icon(
-                    // Sun = the "light mode" end of the switch.
-                    Icons.light_mode_rounded,
-                    size: iconSize,
-                    color: isLight ? scheme.primary : scheme.onSurfaceVariant,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Minimal animated toggle: a pill track with a circular knob that slides
-/// between the off (left) and on (right) positions.
-class _MiniSwitch extends StatelessWidget {
-  const _MiniSwitch({
-    required this.value,
-    required this.width,
-    required this.height,
-    required this.knob,
-    required this.trackOn,
-    required this.trackOff,
-    required this.knobOn,
-    required this.knobOff,
-  });
-
-  final bool value;
-  final double width;
-  final double height;
-  final double knob;
-  final Color trackOn;
-  final Color trackOff;
-  final Color knobOn;
-  final Color knobOff;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: Tokens.durationMedium,
-      curve: Tokens.curveSmooth,
-      width: width,
-      height: height,
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: value ? trackOn : trackOff,
-        borderRadius: BorderRadius.circular(Tokens.radiusPill),
-      ),
-      child: AnimatedAlign(
-        duration: Tokens.durationMedium,
-        curve: Tokens.curveSmooth,
-        alignment: value ? Alignment.centerRight : Alignment.centerLeft,
-        child: Container(
-          width: knob,
-          height: knob,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: value ? knobOn : knobOff,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.25),
-                blurRadius: 4,
-                offset: const Offset(0, 1),
+              const SizedBox(height: 2),
+              Text(
+                destination.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: color,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  fontSize: 11,
+                ),
               ),
             ],
           ),
