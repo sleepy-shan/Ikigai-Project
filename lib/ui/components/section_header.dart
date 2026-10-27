@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../router/app_router.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/theme/design_tokens.dart';
 

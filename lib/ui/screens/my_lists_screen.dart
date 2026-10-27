@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/theme/app_motion.dart';
 import '../../core/theme/app_scroll.dart';
@@ -27,13 +28,13 @@ class MyListsScreen extends ConsumerStatefulWidget {
 }
 
 class _MyListsScreenState extends ConsumerState<MyListsScreen> {
-  late final ScrollController _controller;
+  late final BouncyScrollController _controller;
   bool _showTop = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = ScrollController();
+    _controller = BouncyScrollController();
     _controller.addListener(_onScroll);
   }
 

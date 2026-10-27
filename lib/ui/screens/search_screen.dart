@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme/app_motion.dart';
@@ -34,14 +35,14 @@ class SearchScreen extends ConsumerStatefulWidget {
 class _SearchScreenState extends ConsumerState<SearchScreen> {
   late final TextEditingController _controller;
   final FocusNode _focusNode = FocusNode();
-  late final ScrollController _scrollController;
+  late final BouncyScrollController _scrollController;
   bool _showTop = false;
 
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.initialQuery);
-    _scrollController = ScrollController();
+    _scrollController = BouncyScrollController();
     _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -66,7 +67,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         widget.initialQuery.trim().isNotEmpty &&
         _controller.text != widget.initialQuery) {
       _controller.text = widget.initialQuery;
-      ref.read(searchControllerProvider.notifier).submit(widget.initialQuery);
+      final query = widget.initialQuery;
+      // Providers can't be modified while the widget tree is building
+      // (didUpdateWidget runs during build), so defer to after the frame.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(searchControllerProvider.notifier).submit(query);
+      });
     }
   }
 

@@ -33,14 +33,14 @@ class BrowseScreen extends ConsumerStatefulWidget {
 }
 
 class _BrowseScreenState extends ConsumerState<BrowseScreen> {
-  late final ScrollController _controller;
+  late final BouncyScrollController _controller;
   DateTime _lastEndReached = DateTime.fromMillisecondsSinceEpoch(0);
   bool _showTop = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = ScrollController();
+    _controller = BouncyScrollController();
     _controller.addListener(_onScroll);
     _syncPreset();
   }
