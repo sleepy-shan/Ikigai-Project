@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme/app_scroll.dart';
@@ -28,7 +27,10 @@ final _dayNumFormat = DateFormat('MMM d');
 /// and a grid of horizontal episode cards for the selected day. Each card
 /// shows the release date + time (or an "Aired" marker once past).
 class CalendarScreen extends ConsumerStatefulWidget {
-  const CalendarScreen({super.key});
+  const CalendarScreen({this.initialTab, super.key});
+
+  /// Tab to open on (`?tab=anime|manga`); null keeps the last-used tab.
+  final CalendarTab? initialTab;
 
   @override
   ConsumerState<CalendarScreen> createState() => _CalendarScreenState();
@@ -36,6 +38,27 @@ class CalendarScreen extends ConsumerStatefulWidget {
 
 class _CalendarScreenState extends ConsumerState<CalendarScreen> {
   String? _selectedDayKey;
+
+  @override
+  void initState() {
+    super.initState();
+    _applyInitialTab();
+  }
+
+  @override
+  void didUpdateWidget(covariant CalendarScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialTab != widget.initialTab) _applyInitialTab();
+  }
+
+  void _applyInitialTab() {
+    final tab = widget.initialTab;
+    if (tab == null) return;
+    // Provider state can't be modified during build/initState.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ref.read(calendarControllerProvider.notifier).setTab(tab);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,8 +79,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
       ),
     );
 
-    return CustomScrollView(
-      physics: const SmoothScrollPhysics(),
+    return SmoothCustomScrollView(
       slivers: [
         const SliverToBoxAdapter(child: _Header()),
         const SliverToBoxAdapter(child: _WeekPill()),

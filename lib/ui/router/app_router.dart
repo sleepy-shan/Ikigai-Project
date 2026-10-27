@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
+import 'package:fluro/fluro.dart';
 
 import '../../data/models/account.dart';
 import '../../data/models/media.dart';
 import '../layout/app_shell.dart';
+import '../../state/browse_controller.dart';
+import '../../state/calendar_controller.dart';
 import '../screens/browse_screen.dart';
 import '../screens/calendar_screen.dart';
 import '../screens/history_screen.dart';
@@ -47,118 +48,165 @@ abstract final class Routes {
 
   static String studioWorks(int id) => '$studio/$id';
 
+  /// Browse page pre-set to a home "View all" lineup, e.g.
+  /// `/anime?rail=trending`.
+  static String browseRail(MediaType type, BrowsePreset preset) =>
+      '${type == MediaType.manga ? manga : anime}?rail=${preset.slug}';
+
+  /// Release calendar opened on the Anime or Manga tab.
+  static String calendarFor(MediaType type) =>
+      '$calendar?tab=${type == MediaType.manga ? 'manga' : 'anime'}';
+
   static String searchWith(String query) =>
       '$search?q=${Uri.encodeComponent(query)}';
 }
 
-/// Builds `'/media/:type/:id'`.
-GoRoute mediaDetailRoute() => GoRoute(
-  path: '/media/:type/:id',
-  builder: (context, state) => MediaDetailScreen(
-    mediaId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
-    initialType: MediaType.fromWire(state.pathParameters['type']),
-  ),
-);
+/// Pulls a positive integer path parameter such as `:id`.
+int _intParam(Map<String, List<String>> params, String name) =>
+    int.tryParse(params[name]?.first ?? '') ?? 0;
 
-final appRouterProvider = Provider<GoRouter>((ref) {
-  return GoRouter(
-    // No initialLocation: on the web the router must honor the browser URL
-    // so deep links like /anime or /media/anime/21 work on load/reload.
-    routes: [
-      ShellRoute(
-        builder: (context, state, child) => AppShell(child: child),
-        routes: [
-          GoRoute(
-            path: Routes.home,
-            builder: (context, state) => const HomeScreen(),
-          ),
-          GoRoute(
-            path: Routes.anime,
-            builder: (context, state) =>
-                const BrowseScreen(type: MediaType.anime),
-          ),
-          GoRoute(
-            path: Routes.manga,
-            builder: (context, state) =>
-                const BrowseScreen(type: MediaType.manga),
-          ),
-          GoRoute(
-            path: Routes.calendar,
-            builder: (context, state) => const CalendarScreen(),
-          ),
-          GoRoute(
-            path: Routes.lists,
-            builder: (context, state) => const MyListsScreen(),
-          ),
-          GoRoute(
-            path: Routes.history,
-            builder: (context, state) => const HistoryScreen(),
-          ),
-          GoRoute(
-            path: Routes.search,
-            builder: (context, state) => SearchScreen(
-              initialQuery: state.uri.queryParameters['q'] ?? '',
-            ),
-          ),
-          GoRoute(
-            path: '/profile/list/:section',
-            builder: (context, state) => ProfileListScreen(
-              section: ProfileSection.fromName(
-                state.pathParameters['section'],
-              ),
-            ),
-          ),
-          GoRoute(
-            path: Routes.profile,
-            builder: (context, state) => const ProfileScreen(),
-          ),
-          GoRoute(
-            path: Routes.notifications,
-            builder: (context, state) => const NotificationsScreen(),
-          ),
-          // Settings is a floating dialog now; keep old links working.
-          GoRoute(
-            path: Routes.settings,
-            redirect: (context, state) => Routes.home,
-          ),
-          GoRoute(
-            path: '/staff/:id',
-            builder: (context, state) {
-              final id = int.tryParse(state.pathParameters['id'] ?? '') ?? 0;
-              return PersonWorksScreen(
-                key: ValueKey('staff-$id'),
-                kind: PersonKind.staff,
-                id: id,
-              );
-            },
-          ),
-          GoRoute(
-            path: '/character/:id',
-            builder: (context, state) {
-              final id = int.tryParse(state.pathParameters['id'] ?? '') ?? 0;
-              return PersonWorksScreen(
-                key: ValueKey('character-$id'),
-                kind: PersonKind.character,
-                id: id,
-              );
-            },
-          ),
-          GoRoute(
-            path: '/studio/:id',
-            builder: (context, state) {
-              final id = int.tryParse(state.pathParameters['id'] ?? '') ?? 0;
-              return PersonWorksScreen(
-                key: ValueKey('studio-$id'),
-                kind: PersonKind.studio,
-                id: id,
-              );
-            },
-          ),
-          mediaDetailRoute(),
-        ],
+/// First value of a path/query parameter, or null.
+String? _param(Map<String, List<String>> params, String name) =>
+    params[name]?.first;
+
+/// Wraps [page] in the app chrome (top bar, sidebar, bottom bar).
+///
+/// Fluro has no ShellRoute, so every page route is wrapped explicitly.
+Widget _shell(Widget page) => AppShell(child: page);
+
+/// Opens [Routes.home] as soon as it is built; keeps the old `/settings`
+/// link working now that settings is a floating dialog.
+class _RedirectHome extends StatefulWidget {
+  const _RedirectHome();
+
+  @override
+  State<_RedirectHome> createState() => _RedirectHomeState();
+}
+
+class _RedirectHomeState extends State<_RedirectHome> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.go(Routes.home);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
+}
+
+/// The Fluro router for the whole app.
+///
+/// No initial route is set: on the web the browser URL is honored so deep
+/// links like /anime or /media/anime/21 work on load/reload.
+final FluroRouter appRouter = _buildRouter();
+
+FluroRouter _buildRouter() {
+  final router = FluroRouter();
+
+  void page(String path, Widget Function(Map<String, List<String>>) build) {
+    router.define(
+      path,
+      transitionType: TransitionType.none,
+      handler: Handler(
+        handlerFunc: (context, params) => _shell(build(params)),
       ),
-    ],
-    errorBuilder: (context, state) => Scaffold(
+    );
+  }
+
+  page(Routes.home, (_) => const HomeScreen());
+  page(
+    Routes.anime,
+    (p) => BrowseScreen(
+      type: MediaType.anime,
+      preset: BrowsePreset.fromSlug(_param(p, 'rail')),
+    ),
+  );
+  page(
+    Routes.manga,
+    (p) => BrowseScreen(
+      type: MediaType.manga,
+      preset: BrowsePreset.fromSlug(_param(p, 'rail')),
+    ),
+  );
+  page(
+    Routes.calendar,
+    (p) => CalendarScreen(
+      initialTab: _param(p, 'tab') == 'manga'
+          ? CalendarTab.manga
+          : (_param(p, 'tab') == 'anime' ? CalendarTab.anime : null),
+    ),
+  );
+  page(Routes.lists, (_) => const MyListsScreen());
+  page(Routes.history, (_) => const HistoryScreen());
+  page(
+    Routes.search,
+    (p) => SearchScreen(initialQuery: _param(p, 'q') ?? ''),
+  );
+  page(
+    '${Routes.profile}/list/:section',
+    (p) => ProfileListScreen(
+      section: ProfileSection.fromName(_param(p, 'section')),
+    ),
+  );
+  page(Routes.profile, (_) => const ProfileScreen());
+  page(Routes.notifications, (_) => const NotificationsScreen());
+  // Settings is a floating dialog now; keep old links working.
+  page(Routes.settings, (_) => const _RedirectHome());
+  page(
+    '${Routes.staff}/:id',
+    (p) {
+      final id = _intParam(p, 'id');
+      return PersonWorksScreen(
+        key: ValueKey('staff-$id'),
+        kind: PersonKind.staff,
+        id: id,
+      );
+    },
+  );
+  page(
+    '${Routes.character}/:id',
+    (p) {
+      final id = _intParam(p, 'id');
+      return PersonWorksScreen(
+        key: ValueKey('character-$id'),
+        kind: PersonKind.character,
+        id: id,
+      );
+    },
+  );
+  page(
+    '${Routes.studio}/:id',
+    (p) {
+      final id = _intParam(p, 'id');
+      return PersonWorksScreen(
+        key: ValueKey('studio-$id'),
+        kind: PersonKind.studio,
+        id: id,
+      );
+    },
+  );
+  page(
+    '/media/:type/:id',
+    (p) => MediaDetailScreen(
+      mediaId: _intParam(p, 'id'),
+      initialType: MediaType.fromWire(_param(p, 'type')),
+    ),
+  );
+
+  router.notFoundHandler = Handler(
+    handlerFunc: (context, params) => const _NotFoundScreen(),
+  );
+  return router;
+}
+
+class _NotFoundScreen extends StatelessWidget {
+  const _NotFoundScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
       appBar: AppBar(title: const Text('Page not found')),
       body: Center(
         child: Column(
@@ -173,6 +221,22 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ],
         ),
       ),
-    ),
-  );
-});
+    );
+  }
+}
+
+/// Navigation shortcuts backed by [appRouter].
+extension AppNavigation on BuildContext {
+  /// Replaces the whole navigation stack with [path].
+  Future<void> go(String path) =>
+      appRouter.navigateTo(this, path, clearStack: true);
+
+  /// Pushes [path] on top of the current page.
+  Future<void> push(String path) => appRouter.navigateTo(this, path);
+
+  /// Whether there is a page to go back to.
+  bool canPop() => Navigator.of(this).canPop();
+
+  /// Goes back one page.
+  void pop() => Navigator.of(this).pop();
+}

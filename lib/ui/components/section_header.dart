@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
+import '../router/app_router.dart';
 
 import '../../core/theme/design_tokens.dart';
 
-/// Section title with an eyebrow pill and an optional "see all" action.
+/// Section title with an eyebrow pill and an optional "View all" action.
 ///
 /// The action pill lifts + glows on hover (desktop) via implicit
 /// animations; the eyebrow fades/slides in on first build.
@@ -33,7 +33,8 @@ class SectionHeader extends StatelessWidget {
         Tokens.space16,
         Tokens.space24,
         Tokens.space16,
-        Tokens.space12,
+        // Breathing room between the header (and its button) and the cards.
+        Tokens.space20,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -159,7 +160,7 @@ class _HoverActionPillState extends State<_HoverActionPill> {
               duration: Tokens.durationFast,
               curve: Tokens.curveSmooth,
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(Tokens.radiusPill),
+                borderRadius: BorderRadius.circular(Tokens.radiusMd),
                 border: Border.all(
                   color: _hovering
                       ? theme.colorScheme.primary
@@ -173,6 +174,9 @@ class _HoverActionPillState extends State<_HoverActionPill> {
               ),
               child: TextButton(
                 style: TextButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(Tokens.radiusMd),
+                  ),
                   minimumSize: const Size(0, 36),
                   padding: const EdgeInsets.symmetric(horizontal: 14),
                 ),

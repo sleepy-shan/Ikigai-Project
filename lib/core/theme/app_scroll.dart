@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:web_smooth_scroll/web_smooth_scroll.dart';
 
 /// Buttery, web-first scrolling.
 ///
@@ -78,6 +80,76 @@ class SmoothScrollPhysics extends ClampingScrollPhysics {
 
   @override
   double get maxFlingVelocity => 6000;
+}
+
+/// Drop-in page-level [CustomScrollView] with eased mouse-wheel scrolling on
+/// the web via `web_smooth_scroll`.
+///
+/// On the web the wheel is animated by [WebSmoothScroll], which drives the
+/// shared [ScrollController]; the inner view therefore uses
+/// [NeverScrollableScrollPhysics] (as the package requires) so the wheel isn't
+/// handled twice. Elsewhere it is a plain [CustomScrollView] with
+/// [SmoothScrollPhysics]. Pass [controller] when the screen needs the scroll
+/// position (back-to-top, infinite scroll); otherwise one is created and
+/// disposed here.
+class SmoothCustomScrollView extends StatefulWidget {
+  const SmoothCustomScrollView({
+    required this.slivers,
+    this.controller,
+    super.key,
+  });
+
+  final List<Widget> slivers;
+  final ScrollController? controller;
+
+  @override
+  State<SmoothCustomScrollView> createState() => _SmoothCustomScrollViewState();
+}
+
+class _SmoothCustomScrollViewState extends State<SmoothCustomScrollView> {
+  ScrollController? _own;
+
+  ScrollController get _controller =>
+      widget.controller ?? (_own ??= ScrollController());
+
+  @override
+  void didUpdateWidget(covariant SmoothCustomScrollView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // A screen started supplying its own controller: drop the private one.
+    if (widget.controller != null && _own != null) {
+      _own!.dispose();
+      _own = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _own?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = _controller;
+    if (!kIsWeb) {
+      return CustomScrollView(
+        controller: controller,
+        physics: const SmoothScrollPhysics(),
+        slivers: widget.slivers,
+      );
+    }
+    return WebSmoothScroll(
+      controller: controller,
+      scrollSpeed: 2.1,
+      scrollAnimationLength: 800,
+      curve: Curves.easeOutCubic,
+      child: CustomScrollView(
+        controller: controller,
+        physics: const NeverScrollableScrollPhysics(),
+        slivers: widget.slivers,
+      ),
+    );
+  }
 }
 
 /// Staggered fade + slide entrance. Wrap rail/grid children with an

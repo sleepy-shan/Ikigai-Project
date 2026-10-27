@@ -8,6 +8,49 @@ import '../data/repositories/media_repository.dart';
 import 'load_state.dart';
 import 'media_providers.dart';
 
+/// A named browse lineup reachable from the home "View all" buttons
+/// (`/anime?rail=trending`). Mirrors the sort/status of the matching home rail
+/// so the full page lists the same titles, just without the 12-item cap.
+enum BrowsePreset {
+  airing('airing', 'Currently airing', 'Currently publishing',
+      MediaSort.trending, MediaStatus.releasing),
+  trending('trending', 'Trending anime', 'Trending manga',
+      MediaSort.trending, null),
+  popular('popular', 'All-time popular anime', 'All-time popular manga',
+      MediaSort.popularity, null),
+  topRated('top-rated', 'Top rated anime', 'Top rated manga',
+      MediaSort.score, null),
+  upcoming('upcoming', 'Upcoming anime', 'Upcoming manga',
+      MediaSort.popularity, MediaStatus.notYetReleased),
+  topCompleted('top-completed', 'Top completed anime series',
+      'Top completed manga series', MediaSort.score, MediaStatus.finished);
+
+  const BrowsePreset(
+    this.slug,
+    this.animeTitle,
+    this.mangaTitle,
+    this.sort,
+    this.status,
+  );
+
+  final String slug;
+  final String animeTitle;
+  final String mangaTitle;
+  final MediaSort sort;
+  final MediaStatus? status;
+
+  String titleFor(MediaType type) =>
+      type == MediaType.manga ? mangaTitle : animeTitle;
+
+  static BrowsePreset? fromSlug(String? slug) {
+    if (slug == null) return null;
+    for (final p in values) {
+      if (p.slug == slug) return p;
+    }
+    return null;
+  }
+}
+
 class BrowseState {
   const BrowseState({
     this.query = const BrowseQuery(),
@@ -16,9 +59,13 @@ class BrowseState {
     this.hasNextPage = false,
     this.isLoadingMore = false,
     this.errorMessage,
+    this.preset,
   });
 
   final BrowseQuery query;
+
+  /// Home "View all" lineup currently applied, if any.
+  final BrowsePreset? preset;
   final LoadStatus status;
 
   /// Items currently loaded (accumulated across pages).
@@ -36,6 +83,7 @@ class BrowseState {
     bool? hasNextPage,
     bool? isLoadingMore,
     String? errorMessage,
+    Object? preset = _keepPreset,
   }) {
     return BrowseState(
       query: query ?? this.query,
@@ -44,9 +92,14 @@ class BrowseState {
       hasNextPage: hasNextPage ?? this.hasNextPage,
       isLoadingMore: isLoadingMore ?? this.isLoadingMore,
       errorMessage: errorMessage,
+      preset: identical(preset, _keepPreset)
+          ? this.preset
+          : preset as BrowsePreset?,
     );
   }
 }
+
+const Object _keepPreset = Object();
 
 /// Drives the Anime and Manga browse screens: filters + infinite scroll.
 ///
@@ -250,6 +303,29 @@ class BrowseController extends Notifier<BrowseState> {
   Future<void> clearFilters() async {
     state = state.copyWith(
       query: BrowseQuery(type: mediaType, sort: state.query.sort),
+    );
+    await load();
+  }
+
+  /// Replaces the whole query with a home "View all" lineup and reloads.
+  Future<void> applyPreset(BrowsePreset preset) async {
+    state = state.copyWith(
+      preset: preset,
+      query: BrowseQuery(
+        type: mediaType,
+        sort: preset.sort,
+        status: preset.status,
+      ),
+    );
+    await load();
+  }
+
+  /// Drops a previously applied preset (back to the plain browse page).
+  Future<void> clearPreset() async {
+    if (state.preset == null) return;
+    state = state.copyWith(
+      preset: null,
+      query: BrowseQuery(type: mediaType),
     );
     await load();
   }

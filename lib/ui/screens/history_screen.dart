@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../core/theme/app_scroll.dart';
 import '../../core/theme/design_tokens.dart';
@@ -46,8 +45,7 @@ class HistoryScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final entries = ref.watch(historyControllerProvider);
 
-    return CustomScrollView(
-      physics: const SmoothScrollPhysics(),
+    return SmoothCustomScrollView(
       slivers: [
         SliverToBoxAdapter(
           child: _Header(

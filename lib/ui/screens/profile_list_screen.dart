@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../core/theme/app_scroll.dart';
 import '../../core/theme/design_tokens.dart';
@@ -33,8 +32,7 @@ class _ProfileListScreenState extends ConsumerState<ProfileListScreen> {
     final section = widget.section;
     final list = ref.watch(accountListProvider(section));
 
-    return CustomScrollView(
-      physics: const SmoothScrollPhysics(),
+    return SmoothCustomScrollView(
       slivers: [
         SliverToBoxAdapter(
           child: _ListHeader(

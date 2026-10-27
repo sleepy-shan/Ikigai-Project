@@ -108,8 +108,7 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
 
     // Single scrollable: collapsing banner app bar + content slivers.
     // The banner parallaxes away; the title pins on collapse.
-    return CustomScrollView(
-      physics: const SmoothScrollPhysics(),
+    return SmoothCustomScrollView(
       slivers: [
         _BannerAppBar(media: media),
         SliverToBoxAdapter(child: _TitleRow(media: media, entry: entry)),
