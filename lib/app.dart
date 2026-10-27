@@ -12,14 +12,15 @@ class IkigaiApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final router = ref.watch(appRouterProvider);
     final themeMode = ref.watch(themeModeProvider);
     // Rebuild themes only when the accent changes.
     final accent = ref.watch(accentControllerProvider);
 
-    return MaterialApp(
+    return MaterialApp.router(
       title: 'Ikigai',
       debugShowCheckedModeBanner: false,
-      onGenerateRoute: appRouter.generator,
+      routerConfig: router,
       theme: AppTheme.light(accent),
       darkTheme: AppTheme.dark(accent),
       themeMode: themeMode,

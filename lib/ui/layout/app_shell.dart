@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/theme/design_tokens.dart';
 import '../../state/settings_controller.dart';
@@ -82,9 +83,7 @@ class AppShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final width = MediaQuery.sizeOf(context).width;
     final isCompact = width < Tokens.breakpointMedium;
-    final location =
-        Uri.tryParse(ModalRoute.of(context)?.settings.name ?? '')?.path ??
-        Routes.home;
+    final location = GoRouterState.of(context).uri.path;
     final activePath = _activePath(location);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -103,7 +102,8 @@ class AppShell extends ConsumerWidget {
     }
 
     // Fade the new page in. Not an AnimatedSwitcher: that keeps the old page
-    // mounted next to the new one.
+    // mounted next to the new one, and both contain the shell's navigator,
+    // which owns a GlobalKey — a "Duplicate GlobalKey" error.
     final content = ClipRect(
       child: _PageFade(key: ValueKey(location), child: child),
     );

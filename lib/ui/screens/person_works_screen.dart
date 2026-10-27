@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme/app_scroll.dart';
@@ -33,7 +34,7 @@ class PersonWorksScreen extends ConsumerStatefulWidget {
 }
 
 class _PersonWorksScreenState extends ConsumerState<PersonWorksScreen> {
-  final ScrollController _scroll = ScrollController();
+  final BouncyScrollController _scroll = BouncyScrollController();
   int _page = 1;
 
   /// Last loaded profile, so the header stays put while another page loads.
