@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme/app_scroll.dart';
@@ -117,9 +116,8 @@ class _PersonWorksScreenState extends ConsumerState<PersonWorksScreen> {
           : SliverPosterGrid(items: works.works.items),
     );
 
-    return CustomScrollView(
+    return SmoothCustomScrollView(
       controller: _scroll,
-      physics: const SmoothScrollPhysics(),
       slivers: [
         SliverToBoxAdapter(
           child: _PersonHeader(

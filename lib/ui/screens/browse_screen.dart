@@ -21,9 +21,12 @@ import 'filters_sheet.dart';
 /// no gesture fights, and infinite scroll fires from the outer controller
 /// (throttled).
 class BrowseScreen extends ConsumerStatefulWidget {
-  const BrowseScreen({required this.type, super.key});
+  const BrowseScreen({required this.type, this.preset, super.key});
 
   final MediaType type;
+
+  /// Home "View all" lineup (`?rail=`); null for the plain browse page.
+  final BrowsePreset? preset;
 
   @override
   ConsumerState<BrowseScreen> createState() => _BrowseScreenState();
@@ -39,6 +42,30 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
     super.initState();
     _controller = ScrollController();
     _controller.addListener(_onScroll);
+    _syncPreset();
+  }
+
+  @override
+  void didUpdateWidget(covariant BrowseScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.preset != widget.preset || oldWidget.type != widget.type) {
+      _syncPreset();
+    }
+  }
+
+  /// Applies (or clears) the route's preset once the provider is readable.
+  void _syncPreset() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final controller =
+          ref.read(browseControllerProvider(widget.type).notifier);
+      final preset = widget.preset;
+      if (preset != null) {
+        controller.applyPreset(preset);
+      } else {
+        controller.clearPreset();
+      }
+    });
   }
 
   void _onScroll() {
@@ -80,9 +107,8 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
 
     return Stack(
       children: [
-        CustomScrollView(
+        SmoothCustomScrollView(
           controller: _controller,
-          physics: const SmoothScrollPhysics(),
           slivers: [
             SliverToBoxAdapter(child: _Toolbar(type: widget.type)),
             SliverToBoxAdapter(
@@ -213,6 +239,24 @@ class _Toolbar extends ConsumerWidget {
     final hasMore = ref.watch(
       browseControllerProvider(type).select((s) => s.hasNextPage),
     );
+    // Show the lineup name only while the query still matches the preset
+    // (manual filter/sort edits fall back to the plain title).
+    final title = ref.watch(
+      browseControllerProvider(type).select((s) {
+        final p = s.preset;
+        final q = s.query;
+        final untouched =
+            p != null &&
+            q.sort == p.sort &&
+            q.status == p.status &&
+            (q.genre == null || q.genre!.isEmpty) &&
+            q.format == null &&
+            q.season == null &&
+            q.seasonYear == null &&
+            q.search.trim().isEmpty;
+        return untouched ? p.titleFor(type) : (isManga ? 'Manga' : 'Anime');
+      }),
+    );
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
@@ -237,11 +281,14 @@ class _Toolbar extends ConsumerWidget {
                 ),
               ),
               const SizedBox(width: Tokens.space8),
-              Text(
-                isManga ? 'Manga' : 'Anime',
+              Flexible(
+                child: Text(
+                title,
+                overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.headlineMedium?.copyWith(
                   fontWeight: FontWeight.w800,
                   letterSpacing: -0.3,
+                ),
                 ),
               ),
               const SizedBox(width: Tokens.space8),

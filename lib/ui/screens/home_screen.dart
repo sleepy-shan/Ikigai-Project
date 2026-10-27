@@ -1,8 +1,7 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
+import 'package:flutter_carousel_widget/flutter_carousel_widget.dart';
+import 'package:skeletonizer/skeletonizer.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../core/theme/app_scroll.dart';
 import '../../core/theme/design_tokens.dart';
@@ -11,6 +10,7 @@ import '../../core/utils/formatters.dart';
 import '../../data/models/airing_schedule.dart';
 import '../../data/models/media.dart';
 import '../../data/models/media_entry.dart';
+import '../../state/browse_controller.dart';
 import '../../state/media_providers.dart';
 import '../../state/my_lists_controller.dart';
 import '../components/media_grid.dart';
@@ -23,7 +23,7 @@ import '../router/app_router.dart';
 /// Dashboard: type toggle + spotlight carousel + continue rail + rails.
 ///
 /// Uses a [CustomScrollView] with slivers so the whole page glides as one
-/// smooth scroll surface. The [SegmentedButton] at the top swaps the entire
+/// smooth scroll surface. The type toggle at the top swaps the entire
 /// lineup between anime and manga.
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -40,8 +40,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final continueEntries = ref.watch(continueWatchingProvider);
     final isAnime = _type == MediaType.anime;
 
-    return CustomScrollView(
-      physics: const SmoothScrollPhysics(),
+    return SmoothCustomScrollView(
       slivers: [
         // ---- Anime / manga toggle --------------------------------------
         SliverToBoxAdapter(
@@ -80,7 +79,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               subtitle: 'Shows airing right now this season',
               eyebrow: 'On air',
               rail: MediaRail.airingNow,
-              seeAllPath: Routes.anime,
+              preset: BrowsePreset.airing,
             ),
           ),
           // ---- Trending now ---------------------------------------------
@@ -90,11 +89,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               subtitle: 'What AniList users are watching this week',
               eyebrow: 'Hot now',
               rail: MediaRail.trendingAnime,
-              seeAllPath: Routes.anime,
+              preset: BrowsePreset.trending,
             ),
           ),
-          // ---- Genre quick-jump (unique strip) -------------------------
-          const SliverToBoxAdapter(child: _GenreStrip()),
           // ---- All-time popular -----------------------------------------
           const SliverToBoxAdapter(
             child: _RailSection(
@@ -102,7 +99,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               subtitle: 'The most-loved anime of all time',
               eyebrow: 'Legends',
               rail: MediaRail.allTimePopular,
-              seeAllPath: Routes.anime,
+              preset: BrowsePreset.popular,
             ),
           ),
           // ---- Top rated -------------------------------------------------
@@ -112,7 +109,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               subtitle: 'Highest scored anime by the community',
               eyebrow: 'Acclaimed',
               rail: MediaRail.topRated,
-              seeAllPath: Routes.anime,
+              preset: BrowsePreset.topRated,
             ),
           ),
           // ---- Upcoming ---------------------------------------------------
@@ -122,7 +119,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               subtitle: 'Not yet released — plan what to watch next',
               eyebrow: 'Soon',
               rail: MediaRail.upcoming,
-              seeAllPath: Routes.anime,
+              preset: BrowsePreset.upcoming,
             ),
           ),
           // ---- Top completed ----------------------------------------------
@@ -132,19 +129,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               subtitle: 'Finished favorites worth bingeing',
               eyebrow: 'Completed',
               rail: MediaRail.topCompleted,
-              seeAllPath: Routes.anime,
+              preset: BrowsePreset.topCompleted,
             ),
           ),
         ] else ...[
           // ---- New chapters ---------------------------------------------
-          const SliverToBoxAdapter(
+          SliverToBoxAdapter(
             child: _RailSection(
               title: 'New chapters',
               subtitle: 'Recently updated manga with fresh chapters',
               eyebrow: 'Fresh',
               rail: MediaRail.newChapters,
               type: MediaType.manga,
-              seeAllPath: Routes.manga,
+              viewAllPath: Routes.calendarFor(MediaType.manga),
             ),
           ),
           // ---- Currently publishing --------------------------------------
@@ -155,7 +152,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               eyebrow: 'Publishing',
               rail: MediaRail.airingNow,
               type: MediaType.manga,
-              seeAllPath: Routes.manga,
+              preset: BrowsePreset.airing,
             ),
           ),
           // ---- Trending now ---------------------------------------------
@@ -166,11 +163,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               eyebrow: 'Hot now',
               rail: MediaRail.trendingManga,
               type: MediaType.manga,
-              seeAllPath: Routes.manga,
+              preset: BrowsePreset.trending,
             ),
           ),
-          // ---- Genre quick-jump (unique strip) -------------------------
-          const SliverToBoxAdapter(child: _GenreStrip()),
           // ---- All-time popular -----------------------------------------
           const SliverToBoxAdapter(
             child: _RailSection(
@@ -179,7 +174,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               eyebrow: 'Legends',
               rail: MediaRail.allTimePopular,
               type: MediaType.manga,
-              seeAllPath: Routes.manga,
+              preset: BrowsePreset.popular,
             ),
           ),
           // ---- Top rated -------------------------------------------------
@@ -190,7 +185,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               eyebrow: 'Acclaimed',
               rail: MediaRail.topRated,
               type: MediaType.manga,
-              seeAllPath: Routes.manga,
+              preset: BrowsePreset.topRated,
             ),
           ),
           // ---- Upcoming ---------------------------------------------------
@@ -201,7 +196,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               eyebrow: 'Soon',
               rail: MediaRail.upcoming,
               type: MediaType.manga,
-              seeAllPath: Routes.manga,
+              preset: BrowsePreset.upcoming,
             ),
           ),
           // ---- Top completed ----------------------------------------------
@@ -212,7 +207,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               eyebrow: 'Completed',
               rail: MediaRail.topCompleted,
               type: MediaType.manga,
-              seeAllPath: Routes.manga,
+              preset: BrowsePreset.topCompleted,
             ),
           ),
         ],
@@ -223,7 +218,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 }
 
-/// Anime / manga switcher for the home lineup.
+/// Anime / manga switcher for the home lineup: a dark bordered tray with a
+/// raised, outlined selected segment marked by a dot in the primary colour.
 class _TypeToggle extends StatelessWidget {
   const _TypeToggle({required this.type, required this.onChanged});
 
@@ -232,135 +228,170 @@ class _TypeToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         Tokens.space16,
+        Tokens.space32,
         Tokens.space16,
-        Tokens.space16,
-        Tokens.space4,
+        Tokens.space12,
       ),
       child: Center(
-        child: SegmentedButton<MediaType>(
-          segments: const [
-            ButtonSegment(
-              value: MediaType.anime,
-              label: Text('Anime'),
-              icon: Icon(Icons.movie_outlined, size: 18),
-            ),
-            ButtonSegment(
-              value: MediaType.manga,
-              label: Text('Manga'),
-              icon: Icon(Icons.menu_book_outlined, size: 18),
-            ),
-          ],
-          selected: {type},
-          onSelectionChanged: (selection) => onChanged(selection.first),
-          showSelectedIcon: false,
+        child: Container(
+          padding: const EdgeInsets.all(5),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerLowest,
+            borderRadius: BorderRadius.circular(Tokens.radiusLg),
+            border: Border.all(color: theme.dividerColor),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _ToggleSegment(
+                label: 'Anime',
+                selected: type == MediaType.anime,
+                onTap: () => onChanged(MediaType.anime),
+              ),
+              const SizedBox(width: Tokens.space4),
+              _ToggleSegment(
+                label: 'Manga',
+                selected: type == MediaType.manga,
+                onTap: () => onChanged(MediaType.manga),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// Auto-advancing spotlight carousel: the top trending titles as full-bleed
-/// banners with gradient scrims, glass meta chips and CTA buttons.
+class _ToggleSegment extends StatelessWidget {
+  const _ToggleSegment({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: Tokens.durationFast,
+          curve: Tokens.curveSmooth,
+          constraints: const BoxConstraints(minWidth: 104, minHeight: 44),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          decoration: BoxDecoration(
+            color: selected
+                ? theme.colorScheme.surfaceContainerHigh
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(Tokens.radiusMd),
+            border: Border.all(
+              color: selected ? theme.dividerColor : Colors.transparent,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (selected) ...[
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: primary,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: Tokens.space8),
+              ],
+              Text(
+                label,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                  color: selected
+                      ? primary
+                      : theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Spotlight carousel: the top trending titles as full-bleed banners with
+/// gradient scrims, glass meta chips and CTA buttons, built on
+/// `flutter_carousel_widget`.
+///
+/// Infinite loop, padded ends, the "rotate" effect, a wave
+/// indicator below the cards and autoplay. The package owns the autoplay
+/// timer, so it pauses on touch/hover, off-screen routes and reduced motion.
 ///
 /// Shares the trending provider with the "Trending" rail below for the same
 /// [type], so the carousel costs no extra network request.
-class _SpotlightCarousel extends ConsumerStatefulWidget {
+class _SpotlightCarousel extends ConsumerWidget {
   const _SpotlightCarousel({required this.type, super.key});
 
   final MediaType type;
 
-  @override
-  ConsumerState<_SpotlightCarousel> createState() =>
-      _SpotlightCarouselState();
-}
-
-class _SpotlightCarouselState extends ConsumerState<_SpotlightCarousel> {
   static const slideCount = 5;
   static const height = 340.0;
   static const _autoAdvance = Duration(seconds: 6);
 
-  late final PageController _pages;
-  Timer? _timer;
-  int _index = 0;
-
   @override
-  void initState() {
-    super.initState();
-    _pages = PageController();
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    _pages.dispose();
-    super.dispose();
-  }
-
-  void _ensureTimer(int count) {
-    if (_timer != null || count < 2) return;
-    _timer = Timer.periodic(_autoAdvance, (_) {
-      if (!mounted || !_pages.hasClients) return;
-      // Don't fight the user: skip auto-advance while dragging/scrolling.
-      try {
-        if (_pages.position.isScrollingNotifier.value) return;
-      } catch (_) {}
-      _pages.animateToPage(
-        (_index + 1) % count,
-        duration: Tokens.durationMedium,
-        curve: Tokens.curveSmooth,
-      );
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final trendingRail = widget.type == MediaType.anime
+  Widget build(BuildContext context, WidgetRef ref) {
+    final trendingRail = type == MediaType.anime
         ? MediaRail.trendingAnime
         : MediaRail.trendingManga;
-    final async = ref.watch(mediaRailProvider((trendingRail, widget.type)));
+    final async = ref.watch(mediaRailProvider((trendingRail, type)));
+    final theme = Theme.of(context);
+    final isWide = MediaQuery.sizeOf(context).width >= 840;
     return async.when(
       loading: () => const _CarouselLoading(),
       error: (e, s) => _CarouselError(
-        onRetry: () =>
-            ref.invalidate(mediaRailProvider((trendingRail, widget.type))),
+        onRetry: () => ref.invalidate(mediaRailProvider((trendingRail, type))),
       ),
       data: (page) {
         if (page.items.isEmpty) return const SizedBox.shrink();
         final slides = page.items.take(slideCount).toList();
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _ensureTimer(slides.length);
-        });
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              height: height,
-              child: PageView.builder(
-                controller: _pages,
-                itemCount: slides.length,
-                // Clamping: no bounce-back / back-and-forth on fast swipes,
-                // hard edge so neighbour pages never bleed through.
-                physics: const ClampingScrollPhysics(),
-                clipBehavior: Clip.hardEdge,
-                onPageChanged: (i) => setState(() => _index = i),
-                itemBuilder: (context, i) =>
-                    _CarouselCard(media: slides[i], rank: i + 1),
+        return FlutterCarousel.builder(
+          height: height,
+          itemCount: slides.length,
+          // Pages are tight-sized so the banner image fills its slot.
+          itemAlignment: null,
+          itemBuilder: (context, index, pageIndex) =>
+              _CarouselCard(media: slides[index], rank: index + 1),
+          infinite: true,
+          padEnds: true,
+          // Peek the neighbours so the rotate effect is visible.
+          viewportFraction: isWide ? 0.85 : 0.92,
+          // TODO: apply rotate strength 1.10 once the parameter name is
+          // confirmed from CarouselEffect.rotate's signature.
+          effect: const CarouselEffect.rotate(),
+          autoPlay: const CarouselAutoPlay(interval: _autoAdvance),
+          indicator: CarouselIndicator(
+            painter: CircularWaveIndicator(
+              style: SlideIndicatorStyle(
+                activeColor: theme.colorScheme.primary,
               ),
             ),
-            const SizedBox(height: Tokens.space8),
-            _CarouselDots(
-              count: slides.length,
-              index: _index,
-              onTap: (i) => _pages.animateToPage(
-                i,
-                duration: Tokens.durationMedium,
-                curve: Tokens.curveSmooth,
-              ),
-            ),
-          ],
+            placement: CarouselIndicatorPlacement.below,
+          ),
         );
       },
     );
@@ -374,20 +405,16 @@ class _CarouselLoading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(Tokens.radiusXl),
+      child: Skeletonizer(
+        enabled: true,
+        effect: skeletonEffect(context),
         child: Container(
-          height: _SpotlightCarouselState.height,
-          color: theme.disabledColor.withValues(alpha: 0.10),
-          child: const Center(
-            child: SizedBox(
-              width: 28,
-              height: 28,
-              child: CircularProgressIndicator(strokeWidth: 2.5),
-            ),
+          height: _SpotlightCarousel.height,
+          decoration: BoxDecoration(
+            color: Colors.black12,
+            borderRadius: BorderRadius.circular(Tokens.radiusXl),
           ),
         ),
       ),
@@ -408,7 +435,7 @@ class _CarouselError extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(Tokens.radiusXl),
         child: Container(
-          height: _SpotlightCarouselState.height,
+          height: _SpotlightCarousel.height,
           color: Theme.of(context).disabledColor.withValues(alpha: 0.10),
           child: Center(
             child: TextButton.icon(
@@ -419,47 +446,6 @@ class _CarouselError extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-/// Tappable page dots under the carousel.
-class _CarouselDots extends StatelessWidget {
-  const _CarouselDots({
-    required this.count,
-    required this.index,
-    required this.onTap,
-  });
-
-  final int count;
-  final int index;
-  final ValueChanged<int> onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        for (var i = 0; i < count; i++)
-          GestureDetector(
-            onTap: () => onTap(i),
-            behavior: HitTestBehavior.opaque,
-            child: AnimatedContainer(
-              duration: Tokens.durationFast,
-              curve: Tokens.curveSmooth,
-              width: i == index ? 24 : 8,
-              height: 8,
-              margin: const EdgeInsets.symmetric(horizontal: 3),
-              decoration: BoxDecoration(
-                color: i == index
-                    ? theme.colorScheme.primary
-                    : theme.dividerColor,
-                borderRadius: BorderRadius.circular(Tokens.radiusPill),
-              ),
-            ),
-          ),
-      ],
     );
   }
 }
@@ -480,7 +466,7 @@ class _CarouselCard extends StatelessWidget {
         : media.coverUrl;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+      padding: const EdgeInsets.fromLTRB(6, 0, 6, 4),
       // No RevealOnScroll here: inside a PageView recycled pages would
       // restart at opacity 0 + slide offset on every fast swipe, causing
       // ghosting / overlapping cards.
@@ -488,7 +474,7 @@ class _CarouselCard extends StatelessWidget {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(Tokens.radiusXl),
           child: SizedBox(
-            height: _SpotlightCarouselState.height,
+            height: _SpotlightCarousel.height,
             width: double.infinity,
             child: Stack(
               children: [
@@ -839,6 +825,8 @@ class _AiringTodaySection extends ConsumerWidget {
             title: 'Releasing today',
             subtitle: 'New episodes dropping throughout the day',
             eyebrow: 'Today',
+            actionLabel: 'View all',
+            actionPath: '/calendar?tab=anime',
           ),
           LoadingRail(height: _airingStripHeight, itemWidth: _airingCardWidth),
         ],
@@ -855,8 +843,8 @@ class _AiringTodaySection extends ConsumerWidget {
               subtitle:
                   '${items.length} episode${items.length == 1 ? '' : 's'} dropping throughout the day',
               eyebrow: 'Today',
-              actionLabel: 'Calendar',
-              actionPath: Routes.calendar,
+              actionLabel: 'View all',
+              actionPath: Routes.calendarFor(MediaType.anime),
             ),
             ArrowRail(
               height: _airingStripHeight,
@@ -981,87 +969,30 @@ class _AiringTodayCard extends StatelessWidget {
   }
 }
 
-/// Quick genre jump strip — short static content, so `StaticStrip`
-/// (`SingleChildScrollView + Row`) instead of a virtualized viewport.
-class _GenreStrip extends StatelessWidget {
-  const _GenreStrip();
-
-  static const _genres = [
-    ('Action', Icons.bolt_outlined),
-    ('Romance', Icons.favorite_outline),
-    ('Fantasy', Icons.auto_awesome_outlined),
-    ('Sci-Fi', Icons.rocket_launch_outlined),
-    ('Comedy', Icons.sentiment_satisfied_alt_outlined),
-    ('Drama', Icons.theater_comedy_outlined),
-    ('Horror', Icons.dark_mode_outlined),
-    ('Sports', Icons.sports_soccer_outlined),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const SectionHeader(
-          title: 'Browse by vibe',
-          subtitle: 'Pick a genre to jump into browse with a filter',
-          eyebrow: 'Genres',
-        ),
-        StaticStrip(
-          height: 44,
-          children: [
-            for (var i = 0; i < _genres.length; i++)
-              Builder(
-                builder: (context) {
-                  final (label, icon) = _genres[i];
-                  return ActionChip(
-                    avatar: Icon(
-                      icon,
-                      size: 16,
-                      color: theme.colorScheme.onSurface,
-                    ),
-                    label: Text(
-                      label,
-                      style: TextStyle(
-                        color: theme.colorScheme.onSurface,
-                      ),
-                    ),
-                    onPressed: () => context.go(Routes.searchWith(label)),
-                  );
-                },
-              ),
-          ],
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: Tokens.space16),
-          child: Text(
-            'Tip: drag, swipe, or use the arrows — rails glide with smooth physics.',
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 /// Inline rail that loads its own data and handles every state.
 class _RailSection extends ConsumerWidget {
   const _RailSection({
     required this.title,
     required this.subtitle,
     required this.rail,
-    required this.seeAllPath,
+    this.preset,
+    this.viewAllPath,
     this.type = MediaType.anime,
     this.eyebrow,
-  });
+  }) : assert(
+         preset != null || viewAllPath != null,
+         'A rail needs a preset or an explicit View all path.',
+       );
 
   final String title;
   final String subtitle;
   final MediaRail rail;
-  final String seeAllPath;
+
+  /// Browse lineup the "View all" button opens (`/anime?rail=…`).
+  final BrowsePreset? preset;
+
+  /// Explicit destination overriding [preset] (e.g. the manga calendar).
+  final String? viewAllPath;
   final MediaType type;
   final String? eyebrow;
 
@@ -1075,8 +1006,8 @@ class _RailSection extends ConsumerWidget {
           title: title,
           subtitle: subtitle,
           eyebrow: eyebrow,
-          actionLabel: 'See all',
-          actionPath: seeAllPath,
+          actionLabel: 'View all',
+          actionPath: viewAllPath ?? Routes.browseRail(type, preset!),
         ),
         SizedBox(
           height: 252,

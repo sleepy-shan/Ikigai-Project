@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../core/theme/app_motion.dart';
 import '../../core/theme/app_scroll.dart';
@@ -58,9 +57,8 @@ class _MyListsScreenState extends ConsumerState<MyListsScreen> {
 
     return Stack(
       children: [
-        CustomScrollView(
+        SmoothCustomScrollView(
           controller: _controller,
-          physics: const SmoothScrollPhysics(),
           slivers: [
             const SliverToBoxAdapter(child: _Header()),
             SliverPersistentHeader(

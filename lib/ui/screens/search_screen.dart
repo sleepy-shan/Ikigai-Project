@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme/app_motion.dart';
@@ -85,9 +84,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        CustomScrollView(
+        SmoothCustomScrollView(
           controller: _scrollController,
-          physics: const SmoothScrollPhysics(),
           slivers: const [
             SliverToBoxAdapter(child: _SearchHeader()),
             SliverToBoxAdapter(child: _TabSearchField()),

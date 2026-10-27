@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../core/theme/design_tokens.dart';
 import '../../data/models/account.dart';
@@ -460,7 +459,7 @@ class ProfileNotificationsPanel extends ConsumerWidget {
                 const Spacer(),
                 TextButton(
                   onPressed: () => context.go(Routes.notifications),
-                  child: const Text('See all'),
+                  child: const Text('View all'),
                 ),
               ],
             ),
