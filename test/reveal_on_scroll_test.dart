@@ -4,13 +4,13 @@ import 'package:ikigai_project/core/theme/app_scroll.dart';
 
 void main() {
   Widget item(Object key) => Directionality(
-        textDirection: TextDirection.ltr,
-        child: RevealOnScroll(
-          index: 3, // staggered: starts hidden, then fades in
-          revealKey: key,
-          child: const SizedBox(width: 10, height: 10),
-        ),
-      );
+    textDirection: TextDirection.ltr,
+    child: RevealOnScroll(
+      index: 3, // staggered: starts hidden, then fades in
+      revealKey: key,
+      child: const SizedBox(width: 10, height: 10),
+    ),
+  );
 
   double opacity(WidgetTester tester) =>
       tester.widget<AnimatedOpacity>(find.byType(AnimatedOpacity)).opacity;
