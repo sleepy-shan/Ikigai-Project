@@ -379,6 +379,7 @@ class _SpotlightCarousel extends ConsumerWidget {
           padEnds: true,
           // Peek the neighbours so the rotate effect is visible.
           viewportFraction: isWide ? 0.85 : 0.92,
+          physics: SmoothScrollPhysics(),
           // TODO: apply rotate strength 1.10 once the parameter name is
           // confirmed from CarouselEffect.rotate's signature.
 
