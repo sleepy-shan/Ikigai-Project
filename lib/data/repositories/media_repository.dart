@@ -8,6 +8,10 @@ import '../models/media.dart';
 import '../models/people.dart';
 
 /// Search/browse criteria passed to [MediaRepository.browse].
+/// Sentinel so [BrowseQuery.copyWith] can tell "not passed" from "set to null"
+/// for the newer filters (source, country, score).
+const Object _unset = Object();
+
 class BrowseQuery {
   const BrowseQuery({
     this.type = MediaType.anime,
@@ -18,6 +22,10 @@ class BrowseQuery {
     this.format,
     this.season,
     this.seasonYear,
+    this.source,
+    this.countryOfOrigin,
+    this.minScore,
+    this.isAdult = false,
     this.page = 1,
     this.perPage = 24,
   });
@@ -30,6 +38,19 @@ class BrowseQuery {
   final MediaFormat? format;
   final MediaSeason? season;
   final int? seasonYear;
+
+  /// Adaptation source (Manga, Original, Light Novel, ...).
+  final MediaSource? source;
+
+  /// ISO country code (`JP`, `KR`, `CN`, `TW`).
+  final String? countryOfOrigin;
+
+  /// Minimum average score on AniList's 0-100 scale.
+  final int? minScore;
+
+  /// Explicit (18+) titles. Defaults to false: every other surface (rails,
+  /// search, calendar) stays safe-only; only the browse filter flips it.
+  final bool isAdult;
   final int page;
   final int perPage;
 
@@ -40,7 +61,25 @@ class BrowseQuery {
       status != null ||
       format != null ||
       season != null ||
-      seasonYear != null;
+      seasonYear != null ||
+      source != null ||
+      countryOfOrigin != null ||
+      minScore != null ||
+      isAdult;
+
+  /// Number of active filters (search and sort excluded), for badges.
+  int get activeFilterCount =>
+      [
+        genre != null && genre!.isNotEmpty,
+        status != null,
+        format != null,
+        season != null,
+        seasonYear != null,
+        source != null,
+        countryOfOrigin != null,
+        minScore != null,
+        isAdult,
+      ].where((active) => active).length;
 
   BrowseQuery copyWith({
     MediaType? type,
@@ -51,6 +90,10 @@ class BrowseQuery {
     MediaFormat? format,
     MediaSeason? season,
     int? seasonYear,
+    Object? source = _unset,
+    Object? countryOfOrigin = _unset,
+    Object? minScore = _unset,
+    bool? isAdult,
     int? page,
     int? perPage,
     bool clearFilters = false,
@@ -65,6 +108,15 @@ class BrowseQuery {
       format: clearFilters ? format : (format ?? this.format),
       season: clearFilters ? season : (season ?? this.season),
       seasonYear: clearFilters ? seasonYear : (seasonYear ?? this.seasonYear),
+      // Newer filters: passing null clears them; omitting keeps them (so the
+      // older setters that use clearFilters don't wipe them by accident).
+      source: identical(source, _unset) ? this.source : source as MediaSource?,
+      countryOfOrigin: identical(countryOfOrigin, _unset)
+          ? this.countryOfOrigin
+          : countryOfOrigin as String?,
+      minScore:
+          identical(minScore, _unset) ? this.minScore : minScore as int?,
+      isAdult: isAdult ?? this.isAdult,
       page: page ?? this.page,
       perPage: perPage ?? this.perPage,
     );
@@ -194,6 +246,13 @@ class MediaRepository {
       if (query.season != null && query.season != MediaSeason.unknown)
         'season': query.season!.wire,
       if (query.seasonYear != null) 'seasonYear': query.seasonYear,
+      if (query.source != null) 'source': query.source!.wire,
+      if (query.countryOfOrigin != null)
+        'countryOfOrigin': query.countryOfOrigin,
+      // AniList's filter is a strict ">", so "≥ 7.5" sends 74.
+      if (query.minScore != null) 'minScore': query.minScore! - 1,
+      // Always sent (never null) - see the note above about null variables.
+      'isAdult': query.isAdult,
     };
 
     // Lists use the light selection (relations/recommendations make a
@@ -334,7 +393,9 @@ class MediaRepository {
   String _browseKey(BrowseQuery q) =>
       'browse:${q.type.name}:${q.sort.name}:${q.search.trim().toLowerCase()}'
       ':${q.genre ?? ''}:${q.status?.name ?? ''}:${q.format?.name ?? ''}'
-      ':${q.season?.name ?? ''}:${q.seasonYear ?? 0}:${q.page}:${q.perPage}';
+      ':${q.season?.name ?? ''}:${q.seasonYear ?? 0}'
+      ':${q.source?.name ?? ''}:${q.countryOfOrigin ?? ''}:${q.minScore ?? 0}'
+      ':${q.isAdult ? 1 : 0}:${q.page}:${q.perPage}';
 
   /// Character ranking/search for the Search > Characters tab.
   ///
@@ -670,6 +731,7 @@ class MediaRepository {
       items: AniListMapper.mediaList(pageJson['media']),
       page: (info['currentPage'] as num?)?.toInt() ?? fallbackPage,
       hasNextPage: info['hasNextPage'] == true,
+      total: (info['total'] as num?)?.toInt(),
     );
   }
 }

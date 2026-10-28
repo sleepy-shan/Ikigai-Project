@@ -116,6 +116,39 @@ enum MediaSort {
   final String label;
 }
 
+/// Original material a title is adapted from (AniList `MediaSource`).
+enum MediaSource {
+  original('ORIGINAL', 'Original'),
+  manga('MANGA', 'Manga'),
+  lightNovel('LIGHT_NOVEL', 'Light Novel'),
+  webNovel('WEB_NOVEL', 'Web Novel'),
+  novel('NOVEL', 'Novel'),
+  visualNovel('VISUAL_NOVEL', 'Visual Novel'),
+  videoGame('VIDEO_GAME', 'Video Game'),
+  doujinshi('DOUJINSHI', 'Doujinshi'),
+  comic('COMIC', 'Comic'),
+  liveAction('LIVE_ACTION', 'Live Action'),
+  anime('ANIME', 'Anime'),
+  other('OTHER', 'Other');
+
+  const MediaSource(this.wire, this.label);
+
+  final String wire;
+  final String label;
+}
+
+/// Countries of origin offered by AniList (`countryOfOrigin` ISO codes).
+const Map<String, String> kCountries = {
+  'JP': 'Japan',
+  'KR': 'South Korea',
+  'CN': 'China',
+  'TW': 'Taiwan',
+};
+
+/// Minimum average scores offered by the Score filter (0-100 scale; shown
+/// to the user on a 10-point scale, e.g. 75 -> "≥ 7.5").
+const List<int> kScoreThresholds = [90, 85, 80, 75, 70, 65, 60, 50];
+
 /// Genres offered by the AniList API (their fixed `GenreCollection`).
 const List<String> kGenres = [
   'Action',
@@ -255,11 +288,15 @@ class MediaPage {
     required this.items,
     required this.page,
     required this.hasNextPage,
+    this.total,
   });
 
   final List<Media> items;
   final int page;
   final bool hasNextPage;
+
+  /// Total matching titles reported by the API (`pageInfo.total`), if known.
+  final int? total;
 
   static const MediaPage empty = MediaPage(
     items: [],

@@ -399,13 +399,16 @@ class LoadingDetail extends StatelessWidget {
 
 /// Grid of poster skeletons used as the loading state for poster grids.
 class LoadingPosterGrid extends StatelessWidget {
-  const LoadingPosterGrid({super.key});
+  const LoadingPosterGrid({this.columnsForWidth = posterColumns, super.key});
+
+  /// Column count for a given width (browse uses a denser, smaller grid).
+  final int Function(double width) columnsForWidth;
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final columns = posterColumns(constraints.maxWidth);
+        final columns = columnsForWidth(constraints.maxWidth);
         final columnGap = posterColumnGap(constraints.maxWidth);
         final tileWidth =
             (constraints.maxWidth -
@@ -446,6 +449,91 @@ int posterColumns(double width) {
   if (width >= 900) return 4;
   if (width >= 600) return 3;
   return 2;
+}
+
+/// Denser variant of [posterColumns] for the Anime/Manga browse pages: one
+/// more column at every breakpoint, so each card is smaller.
+int browsePosterColumns(double width) {
+  if (width >= 1800) return 10;
+  if (width >= 1500) return 9;
+  if (width >= 1200) return 8;
+  if (width >= 900) return 6;
+  if (width >= 600) return 5;
+  return 3;
+}
+
+/// Compact-card metrics for the browse grid.
+double browseColumnGap(double width) => width >= 1080 ? 16 : 12;
+const double kBrowseRowGap = 20;
+const double kBrowseTextHeight = 42;
+
+/// Skeleton for one compact browse card (poster + title + subtitle).
+class CompactPosterSkeleton extends StatelessWidget {
+  const CompactPosterSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Expanded(child: _BoneBox(radius: Tokens.radiusMd)),
+        const SizedBox(height: Tokens.space8),
+        Text(
+          'Placeholder title',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.labelLarge?.copyWith(
+            fontWeight: FontWeight.w700,
+            fontSize: 12.5,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          'TV • 2024',
+          maxLines: 1,
+          style: theme.textTheme.labelSmall?.copyWith(fontSize: 10.5),
+        ),
+      ],
+    );
+  }
+}
+
+/// Shimmering skeleton page for the browse grid (Skeletonizer).
+class BrowseSkeletonGrid extends StatelessWidget {
+  const BrowseSkeletonGrid({this.count = 24, super.key});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final columns = browsePosterColumns(width);
+        final gap = browseColumnGap(width);
+        final tileWidth =
+            (width - (columns - 1) * gap - Tokens.space32) / columns;
+        final tileHeight = tileWidth / Tokens.posterAspect + kBrowseTextHeight;
+        return _SkeletonScope(
+          child: GridView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: Tokens.space16),
+            physics: const NeverScrollableScrollPhysics(),
+            shrinkWrap: true,
+            addAutomaticKeepAlives: false,
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: columns,
+              mainAxisSpacing: kBrowseRowGap,
+              crossAxisSpacing: gap,
+              childAspectRatio: tileWidth / tileHeight,
+            ),
+            itemCount: count,
+            itemBuilder: (context, index) => const CompactPosterSkeleton(),
+          ),
+        );
+      },
+    );
+  }
 }
 
 /// Horizontal gap between poster columns; grows with the viewport.

@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show ScrollDirection;
+import 'package:flutter/rendering.dart' show ScrollCacheExtent, ScrollDirection;
 import 'package:flutter/scheduler.dart';
 
 /// Smooth + bouncy scrolling for **every** input (wheel, trackpad, touch drag,
@@ -55,7 +55,7 @@ class BouncyScrollController extends ScrollController {
   final double maxOverscroll;
 
   /// Wheel deltas smaller than this are treated as a trackpad (precise input)
-  /// and follow the finger more tightly instead of being smoothed heavily.
+  /// and follow the finger 1:1 (no spring), which feels more direct.
   final double preciseThreshold;
 
   @override
@@ -97,12 +97,30 @@ class _BouncyScrollPosition extends ScrollPositionWithSingleContext {
   double _velocity = 0;
   double _stiffness = 170;
 
+  /// Monotonic clock used to recognise a continuous trackpad gesture.
+  final Stopwatch _clock = Stopwatch()..start();
+  int _preciseUntilMs = 0;
+
   @override
   void pointerScroll(double delta) {
     if (delta == 0) return;
-    final precise = delta.abs() < controller.preciseThreshold;
-    final scaled = delta * (precise ? 1.0 : controller.wheelSpeed);
-    _stiffness = controller.stiffness * (precise ? 2.6 : 1.0);
+
+    // Trackpads (and high-resolution wheels) stream many small deltas and the
+    // OS already adds its own inertia, so smoothing them again with a spring
+    // only adds lag. Follow them 1:1 instead. Once a gesture looks like this,
+    // stay in that mode for a moment so a fast swipe (a few big deltas) is not
+    // suddenly multiplied like a discrete wheel notch.
+    final nowMs = _clock.elapsedMilliseconds;
+    final small = delta.abs() < controller.preciseThreshold;
+    if (small || nowMs < _preciseUntilMs) {
+      _preciseUntilMs = nowMs + 160;
+      super.pointerScroll(delta); // hands over from any running wheel spring
+      return;
+    }
+
+    // A discrete mouse-wheel notch: spring-smoothed, with a small edge bounce.
+    final scaled = delta * controller.wheelSpeed;
+    _stiffness = controller.stiffness;
 
     if (!_animating) {
       _internal = true;
@@ -291,10 +309,17 @@ class _Geo {
 }
 
 class _BouncyScrollbarState extends State<BouncyScrollbar> {
-  ScrollMetrics? _m;
+  /// Latest scroll metrics. Only the thumb listens to this (through a
+  /// [ValueListenableBuilder]), so a scroll frame no longer rebuilds the whole
+  /// scrollbar widget with `setState`.
+  final ValueNotifier<ScrollMetrics?> _metrics =
+      ValueNotifier<ScrollMetrics?>(null);
+  final Stopwatch _clock = Stopwatch()..start();
   bool _visible = false;
   bool _hover = false;
   bool _drag = false;
+  bool _downOnThumb = false;
+  int _lastPokeMs = 0;
   Timer? _hideTimer;
 
   bool get _vertical => widget.axis == Axis.vertical;
@@ -302,6 +327,7 @@ class _BouncyScrollbarState extends State<BouncyScrollbar> {
   @override
   void dispose() {
     _hideTimer?.cancel();
+    _metrics.dispose();
     super.dispose();
   }
 
@@ -317,31 +343,48 @@ class _BouncyScrollbarState extends State<BouncyScrollbar> {
     }
   }
 
+  /// Publishes new metrics to the thumb. Notifications can arrive during
+  /// layout, where rebuilding is not allowed, so those wait for the frame end.
+  void _setMetrics(ScrollMetrics m) {
+    if (!mounted) return;
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.persistentCallbacks) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _metrics.value = m;
+      });
+    } else {
+      _metrics.value = m;
+    }
+  }
+
+  /// Keeps the bar visible while scrolling. Cheap on purpose: this runs on
+  /// every scroll frame, so the timer is only re-armed every ~120ms rather
+  /// than being cancelled and recreated each time.
   void _poke() {
+    final now = _clock.elapsedMilliseconds;
+    if ((_hideTimer?.isActive ?? false) && now - _lastPokeMs < 120) return;
+    _lastPokeMs = now;
     _hideTimer?.cancel();
     _hideTimer = Timer(widget.fadeDelay, () {
-      if (mounted && !_drag) setState(() => _visible = false);
+      if (mounted && !_drag && _visible) setState(() => _visible = false);
     });
   }
 
   bool _onScroll(ScrollNotification n) {
     if (n.depth != 0 || n.metrics.axis != widget.axis) return false;
-    _safeSetState(() {
-      _m = n.metrics;
-      _visible = true;
-    });
+    _setMetrics(n.metrics);
+    if (!_visible) _safeSetState(() => _visible = true);
     _poke();
     return false;
   }
 
   bool _onMetrics(ScrollMetricsNotification n) {
     if (n.depth != 0 || n.metrics.axis != widget.axis) return false;
-    _safeSetState(() => _m = n.metrics);
+    _setMetrics(n.metrics);
     return false;
   }
 
-  _Geo? _geo() {
-    final m = _m;
+  _Geo? _geo(ScrollMetrics? m) {
     if (m == null) return null;
     final range = m.maxScrollExtent - m.minScrollExtent;
     if (range <= 0.5) return null;
@@ -374,9 +417,18 @@ class _BouncyScrollbarState extends State<BouncyScrollbar> {
   bool _onThumb(double pos, _Geo g) =>
       pos >= g.offset - 4 && pos <= g.offset + g.length + 4;
 
-  void _dragStart(double pos) {
-    final g = _geo();
-    if (g == null || !_onThumb(pos, g)) return;
+  bool get _interactive =>
+      _visible || _hover || _drag || widget.alwaysVisible;
+
+  /// Pointer-down hit test (fires immediately, unlike the drag-start position
+  /// which is only known after the pointer has already moved past the slop).
+  void _down(double pos) {
+    final g = _geo(_metrics.value);
+    _downOnThumb = g != null && _onThumb(pos, g);
+  }
+
+  void _dragStart() {
+    if (!_downOnThumb) return;
     _hideTimer?.cancel();
     setState(() {
       _drag = true;
@@ -385,7 +437,7 @@ class _BouncyScrollbarState extends State<BouncyScrollbar> {
   }
 
   void _dragUpdate(double delta) {
-    final g = _geo();
+    final g = _geo(_metrics.value);
     final c = widget.controller;
     if (!_drag || g == null || !c.hasClients) return;
     final free = g.track - g.length;
@@ -399,15 +451,21 @@ class _BouncyScrollbarState extends State<BouncyScrollbar> {
   }
 
   void _dragEnd() {
+    _downOnThumb = false;
     if (!_drag) return;
     setState(() => _drag = false);
     _poke();
   }
 
+  /// Click on the empty track pages toward the click. Fires on release (a tap),
+  /// so it never fights a thumb drag, and is ignored while the bar is hidden
+  /// so a stray tap on the edge of the page does not scroll it.
   void _trackTap(double pos) {
-    final g = _geo();
+    final g = _geo(_metrics.value);
     final c = widget.controller;
-    if (g == null || !c.hasClients || _onThumb(pos, g)) return;
+    if (!_interactive || g == null || !c.hasClients || _onThumb(pos, g)) {
+      return;
+    }
     final p = c.position;
     final dir = pos < g.offset ? -1.0 : 1.0;
     final to = (p.pixels + dir * p.viewportDimension * 0.9)
@@ -420,75 +478,83 @@ class _BouncyScrollbarState extends State<BouncyScrollbar> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final base = widget.color ?? scheme.onSurface;
-    final g = _geo();
+  Widget _bar(_Geo g, Color base) {
     final active = _hover || _drag;
-    final shown = g != null && (_visible || active || widget.alwaysVisible);
+    final shown = _interactive;
     final thick = active ? widget.hoverThickness : widget.thickness;
     final stripExtent = widget.hoverThickness + widget.margin * 2;
     final alpha = _drag ? 0.78 : (_hover ? 0.58 : 0.36);
 
-    Widget? bar;
-    if (g != null) {
-      final thumb = AnimatedContainer(
+    // Length follows the scroll position exactly (no animation lag while
+    // overscroll squashes it); only the hover thickness is animated.
+    final thumb = SizedBox(
+      width: _vertical ? null : g.length,
+      height: _vertical ? g.length : null,
+      child: AnimatedContainer(
         duration: const Duration(milliseconds: 140),
         curve: Curves.easeOutCubic,
-        width: _vertical ? thick : g.length,
-        height: _vertical ? g.length : thick,
+        width: _vertical ? thick : null,
+        height: _vertical ? null : thick,
         decoration: BoxDecoration(
           color: base.withValues(alpha: alpha),
           borderRadius: BorderRadius.circular(999),
         ),
-      );
-      bar = Positioned(
-        top: _vertical ? 0 : null,
-        bottom: _vertical ? 0 : 0,
-        right: _vertical ? 0 : null,
-        left: _vertical ? null : 0,
-        width: _vertical ? stripExtent : null,
-        height: _vertical ? null : stripExtent,
-        child: MouseRegion(
-          onEnter: (_) => setState(() => _hover = true),
-          onExit: (_) => setState(() => _hover = false),
-          child: GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onTapDown: (d) => _trackTap(
-              _vertical ? d.localPosition.dy : d.localPosition.dx,
-            ),
-            onVerticalDragStart:
-                _vertical ? (d) => _dragStart(d.localPosition.dy) : null,
-            onVerticalDragUpdate:
-                _vertical ? (d) => _dragUpdate(d.primaryDelta ?? 0) : null,
-            onVerticalDragEnd: _vertical ? (_) => _dragEnd() : null,
-            onVerticalDragCancel: _vertical ? _dragEnd : null,
-            onHorizontalDragStart:
-                _vertical ? null : (d) => _dragStart(d.localPosition.dx),
-            onHorizontalDragUpdate:
-                _vertical ? null : (d) => _dragUpdate(d.primaryDelta ?? 0),
-            onHorizontalDragEnd: _vertical ? null : (_) => _dragEnd(),
-            onHorizontalDragCancel: _vertical ? null : _dragEnd,
-            child: AnimatedOpacity(
-              opacity: shown ? 1 : 0,
-              duration: Duration(milliseconds: shown ? 120 : 280),
-              child: Stack(
-                children: [
-                  Positioned(
-                    top: _vertical ? g.offset : null,
-                    bottom: _vertical ? null : widget.margin,
-                    right: _vertical ? widget.margin : null,
-                    left: _vertical ? null : g.offset,
-                    child: RepaintBoundary(child: thumb),
-                  ),
-                ],
-              ),
+      ),
+    );
+
+    final strip = SizedBox(
+      width: _vertical ? stripExtent : double.infinity,
+      height: _vertical ? double.infinity : stripExtent,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTapUp: (d) =>
+              _trackTap(_vertical ? d.localPosition.dy : d.localPosition.dx),
+          onVerticalDragDown:
+              _vertical ? (d) => _down(d.localPosition.dy) : null,
+          onVerticalDragStart: _vertical ? (_) => _dragStart() : null,
+          onVerticalDragUpdate:
+              _vertical ? (d) => _dragUpdate(d.primaryDelta ?? 0) : null,
+          onVerticalDragEnd: _vertical ? (_) => _dragEnd() : null,
+          onVerticalDragCancel: _vertical ? _dragEnd : null,
+          onHorizontalDragDown:
+              _vertical ? null : (d) => _down(d.localPosition.dx),
+          onHorizontalDragStart: _vertical ? null : (_) => _dragStart(),
+          onHorizontalDragUpdate:
+              _vertical ? null : (d) => _dragUpdate(d.primaryDelta ?? 0),
+          onHorizontalDragEnd: _vertical ? null : (_) => _dragEnd(),
+          onHorizontalDragCancel: _vertical ? null : _dragEnd,
+          child: AnimatedOpacity(
+            opacity: shown ? 1 : 0,
+            duration: Duration(milliseconds: shown ? 120 : 280),
+            child: Stack(
+              children: [
+                Positioned(
+                  top: _vertical ? g.offset : null,
+                  bottom: _vertical ? null : widget.margin,
+                  right: _vertical ? widget.margin : null,
+                  left: _vertical ? null : g.offset,
+                  child: RepaintBoundary(child: thumb),
+                ),
+              ],
             ),
           ),
         ),
-      );
-    }
+      ),
+    );
+
+    return Align(
+      alignment: _vertical ? Alignment.centerRight : Alignment.bottomCenter,
+      child: strip,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final base = widget.color ?? scheme.onSurface;
 
     return Stack(
       children: [
@@ -501,7 +567,17 @@ class _BouncyScrollbarState extends State<BouncyScrollbar> {
             ),
           ),
         ),
-        ?bar,
+        // Only this layer rebuilds as the list scrolls.
+        Positioned.fill(
+          child: ValueListenableBuilder<ScrollMetrics?>(
+            valueListenable: _metrics,
+            builder: (context, metrics, _) {
+              final g = _geo(metrics);
+              if (g == null) return const SizedBox.shrink();
+              return _bar(g, base);
+            },
+          ),
+        ),
       ],
     );
   }
@@ -518,6 +594,7 @@ class BouncySmoothScrollView extends StatefulWidget {
     this.controller,
     this.scrollbar = true,
     this.physics,
+    this.cacheExtent = 800,
     super.key,
   });
 
@@ -527,6 +604,10 @@ class BouncySmoothScrollView extends StatefulWidget {
   final BouncyScrollController? controller;
   final bool scrollbar;
   final ScrollPhysics? physics;
+
+  /// How far (px) beyond the viewport items are built and their images
+  /// loaded, so fast scrolling reveals finished cards instead of spinners.
+  final double cacheExtent;
 
   @override
   State<BouncySmoothScrollView> createState() =>
@@ -563,6 +644,7 @@ class _BouncySmoothScrollViewState extends State<BouncySmoothScrollView> {
       child: CustomScrollView(
         controller: controller,
         physics: widget.physics ?? const BouncySmoothPhysics(),
+        scrollCacheExtent: ScrollCacheExtent.pixels(widget.cacheExtent),
         slivers: widget.slivers,
       ),
     );

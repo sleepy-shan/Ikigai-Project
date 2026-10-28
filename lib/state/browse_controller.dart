@@ -57,7 +57,7 @@ class BrowseState {
     this.status = LoadStatus.initial,
     this.items = const [],
     this.hasNextPage = false,
-    this.isLoadingMore = false,
+    this.totalItems,
     this.errorMessage,
     this.preset,
   });
@@ -68,20 +68,61 @@ class BrowseState {
   final BrowsePreset? preset;
   final LoadStatus status;
 
-  /// Items currently loaded (accumulated across pages).
+  /// Titles on the page currently shown (one page at a time).
   final List<Media> items;
   final bool hasNextPage;
-  final bool isLoadingMore;
+
+  /// Total matches across all pages, when the API reports it.
+  final int? totalItems;
   final String? errorMessage;
 
   bool get isFiltered => query.hasFilters;
+
+  /// The page currently shown (1-based).
+  int get currentPage => query.page;
+
+  /// Best-known number of pages.
+  ///
+  /// AniList's `total` is documented as approximate, so it is never allowed
+  /// to contradict what the paging flags say: there are at least as many
+  /// pages as the current one, plus one more while `hasNextPage` is true.
+  int get pageCount {
+    final total = totalItems;
+    final perPage = query.perPage < 1 ? 1 : query.perPage;
+    final byTotal = (total == null || total <= 0)
+        ? 1
+        : (total + perPage - 1) ~/ perPage;
+    final atLeast = hasNextPage ? currentPage + 1 : currentPage;
+    return byTotal < atLeast ? atLeast : byTotal;
+  }
+
+  /// The home "View all" lineup, but only while the query still matches it
+  /// exactly. Manual filter or sort edits make this null, which is what the
+  /// header title and the lineup pills key off.
+  BrowsePreset? get activePreset {
+    final p = preset;
+    if (p == null) return null;
+    final q = query;
+    final untouched = q.sort == p.sort &&
+        q.status == p.status &&
+        (q.genre == null || q.genre!.isEmpty) &&
+        q.format == null &&
+        q.season == null &&
+        q.seasonYear == null &&
+        q.source == null &&
+        q.countryOfOrigin == null &&
+        q.minScore == null &&
+        !q.isAdult &&
+        q.search.trim().isEmpty;
+    return untouched ? p : null;
+  }
 
   BrowseState copyWith({
     BrowseQuery? query,
     LoadStatus? status,
     List<Media>? items,
     bool? hasNextPage,
-    bool? isLoadingMore,
+    int? totalItems,
     String? errorMessage,
     Object? preset = _keepPreset,
   }) {
@@ -90,7 +131,7 @@ class BrowseState {
       status: status ?? this.status,
       items: items ?? this.items,
       hasNextPage: hasNextPage ?? this.hasNextPage,
-      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
+      totalItems: totalItems ?? this.totalItems,
       errorMessage: errorMessage,
       preset: identical(preset, _keepPreset)
           ? this.preset
@@ -101,10 +142,10 @@ class BrowseState {
 
 const Object _keepPreset = Object();
 
-/// Drives the Anime and Manga browse screens: filters + infinite scroll.
+/// Drives the Anime and Manga browse screens: filters + page-by-page results.
 ///
 /// Smart state: a monotonic [_requestId] discards stale responses when
-/// filters change rapidly or `loadMore` overlaps a fresh `load`.
+/// filters change rapidly or the reader flips pages quickly.
 class BrowseController extends Notifier<BrowseState> {
   BrowseController(this.mediaType);
 
@@ -119,17 +160,25 @@ class BrowseController extends Notifier<BrowseState> {
     return BrowseState(query: BrowseQuery(type: mediaType));
   }
 
+  /// Loads the page in `state.query.page`, replacing what is shown.
   Future<void> load() async {
     final id = ++_requestId;
     state = state.copyWith(status: LoadStatus.loading, errorMessage: null);
     try {
       final page = await _repo.browse(state.query);
       if (id != _requestId) return; // superseded by a newer request.
+      // A page past the end (the API total is only approximate): fall back
+      // to the first page instead of showing an empty state.
+      if (page.items.isEmpty && state.query.page > 1) {
+        state = state.copyWith(query: state.query.copyWith(page: 1));
+        return await load();
+      }
       state = state.copyWith(
         status: LoadStatus.success,
         query: state.query.copyWith(page: page.page),
         items: page.items,
         hasNextPage: page.hasNextPage,
+        totalItems: page.total,
         errorMessage: null,
       );
     } on AppException catch (error) {
@@ -147,30 +196,13 @@ class BrowseController extends Notifier<BrowseState> {
     }
   }
 
-  Future<void> loadMore() async {
-    if (state.isLoadingMore || !state.hasNextPage) return;
-    final id = _requestId;
-    state = state.copyWith(isLoadingMore: true);
-    try {
-      final nextPage = state.query.page + 1;
-      final page = await _repo.browse(state.query.copyWith(page: nextPage));
-      if (id != _requestId) return; // a fresh load superseded pagination.
-      state = state.copyWith(
-        query: state.query.copyWith(page: nextPage),
-        items: [...state.items, ...page.items],
-        hasNextPage: page.hasNextPage,
-        isLoadingMore: false,
-      );
-    } catch (_) {
-      // Keep existing items visible; user can scroll again to retry.
-      if (id == _requestId) state = state.copyWith(isLoadingMore: false);
+  /// Shows [page] (1-based). Ignored when it is already the page on screen.
+  Future<void> goToPage(int page) async {
+    final target = page < 1 ? 1 : page;
+    if (target == state.query.page && state.status == LoadStatus.success) {
+      return;
     }
-  }
-
-  Future<void> setSearch(String search) async {
-    state = state.copyWith(
-      query: state.query.copyWith(page: 1, search: search),
-    );
+    state = state.copyWith(query: state.query.copyWith(page: target));
     await load();
   }
 
@@ -194,6 +226,15 @@ class BrowseController extends Notifier<BrowseState> {
         clearFilters: true,
         page: 1,
       ),
+    );
+    await load();
+  }
+
+  /// Replaces the whole query (filters, sort, search) and reloads once from
+  /// page 1. Used by the filter sidebar and the mobile filter sheet.
+  Future<void> applyQuery(BrowseQuery query) async {
+    state = state.copyWith(
+      query: query.copyWith(type: mediaType, page: 1),
     );
     await load();
   }
@@ -226,19 +267,6 @@ class BrowseController extends Notifier<BrowseState> {
         seasonYear: q.seasonYear,
         clearFilters: true,
       ),
-    );
-    await load();
-  }
-
-  /// Jumps to [page] (1-based), replacing items instead of accumulating.
-  Future<void> goToPage(int page) async {
-    final target = page < 1 ? 1 : page;
-    if (target == state.query.page &&
-        state.status != LoadStatus.initial) {
-      return;
-    }
-    state = state.copyWith(
-      query: state.query.copyWith(page: target),
     );
     await load();
   }
@@ -293,6 +321,35 @@ class BrowseController extends Notifier<BrowseState> {
     await load();
   }
 
+  Future<void> setSource(MediaSource? source) async {
+    state = state.copyWith(
+      query: state.query.copyWith(page: 1, source: source),
+    );
+    await load();
+  }
+
+  Future<void> setCountry(String? countryCode) async {
+    state = state.copyWith(
+      query: state.query.copyWith(page: 1, countryOfOrigin: countryCode),
+    );
+    await load();
+  }
+
+  /// [minScore] is on AniList's 0-100 scale; null removes the filter.
+  Future<void> setMinScore(int? minScore) async {
+    state = state.copyWith(
+      query: state.query.copyWith(page: 1, minScore: minScore),
+    );
+    await load();
+  }
+
+  Future<void> setAdult(bool isAdult) async {
+    state = state.copyWith(
+      query: state.query.copyWith(page: 1, isAdult: isAdult),
+    );
+    await load();
+  }
+
   Future<void> setSort(MediaSort sort) async {
     state = state.copyWith(
       query: state.query.copyWith(page: 1, sort: sort),
@@ -300,7 +357,11 @@ class BrowseController extends Notifier<BrowseState> {
     await load();
   }
 
+  /// Drops every filter. While a lineup is applied this returns to that
+  /// lineup (its sort and status are part of what it is), not to a bare query.
   Future<void> clearFilters() async {
+    final lineup = state.preset;
+    if (lineup != null) return applyPreset(lineup);
     state = state.copyWith(
       query: BrowseQuery(type: mediaType, sort: state.query.sort),
     );
@@ -327,6 +388,12 @@ class BrowseController extends Notifier<BrowseState> {
       preset: null,
       query: BrowseQuery(type: mediaType),
     );
+    await load();
+  }
+
+  /// Plain browse page: no lineup, no filters, default sort.
+  Future<void> showAll() async {
+    state = state.copyWith(preset: null, query: BrowseQuery(type: mediaType));
     await load();
   }
 

@@ -15,10 +15,19 @@ import '../router/app_router.dart';
 /// flicker or re-decode. A [Hero] on the cover gives a smooth shared
 /// transition into the detail page.
 class PosterCard extends StatelessWidget {
-  const PosterCard({required this.media, this.width, super.key});
+  const PosterCard({
+    required this.media,
+    this.width,
+    this.compact = false,
+    super.key,
+  });
 
   final Media media;
   final double? width;
+
+  /// Smaller card for dense browse grids: tighter radius, one-line title,
+  /// smaller badges.
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -26,33 +35,40 @@ class PosterCard extends StatelessWidget {
     return SizedBox(
       width: width,
       child: HoverLift(
-        lift: 5,
-        scale: 1.02,
+        lift: compact ? 4 : 5,
+        scale: compact ? 1.03 : 1.02,
         glow: true,
         child: InkWell(
-          borderRadius: BorderRadius.circular(Tokens.radiusLg),
+          borderRadius: BorderRadius.circular(
+            compact ? Tokens.radiusMd : Tokens.radiusLg,
+          ),
           onTap: () => context.go(Routes.mediaDetail(media.type, media.id)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(child: _PosterImage(media: media)),
-              const SizedBox(height: Tokens.space12),
+              Expanded(child: _PosterImage(media: media, compact: compact)),
+              SizedBox(height: compact ? Tokens.space8 : Tokens.space12),
               Text(
                 media.title,
-                maxLines: 2,
+                maxLines: compact ? 1 : 2,
                 overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleMedium?.copyWith(
+                style: (compact
+                        ? theme.textTheme.labelLarge
+                        : theme.textTheme.titleMedium)
+                    ?.copyWith(
                   fontWeight: FontWeight.w700,
                   letterSpacing: -0.1,
+                  fontSize: compact ? 12.5 : null,
                 ),
               ),
-              const SizedBox(height: Tokens.space4),
+              SizedBox(height: compact ? 2 : Tokens.space4),
               Text(
                 _subtitle(media),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
+                  fontSize: compact ? 10.5 : null,
                 ),
               ),
             ],
@@ -75,9 +91,10 @@ class PosterCard extends StatelessWidget {
 
 /// Poster artwork with graceful handling for missing/broken images.
 class _PosterImage extends StatelessWidget {
-  const _PosterImage({required this.media});
+  const _PosterImage({required this.media, this.compact = false});
 
   final Media media;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -89,7 +106,9 @@ class _PosterImage extends StatelessWidget {
     return RepaintBoundary(
       child: Container(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(Tokens.radiusLg),
+          borderRadius: BorderRadius.circular(
+            compact ? Tokens.radiusMd : Tokens.radiusLg,
+          ),
           boxShadow: Tokens.cardShadow(theme.brightness),
           border: Border.all(
             color: theme.brightness == Brightness.dark
@@ -98,32 +117,46 @@ class _PosterImage extends StatelessWidget {
           ),
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(Tokens.radiusLg - 1),
+          borderRadius: BorderRadius.circular(
+            (compact ? Tokens.radiusMd : Tokens.radiusLg) - 1,
+          ),
           child: Stack(
             fit: StackFit.expand,
             children: [
               Hero(
                 tag: 'media-cover-${media.id}',
-                child: Image.network(
-                  url,
-                  fit: BoxFit.cover,
-                  gaplessPlayback: true,
-                  filterQuality: FilterQuality.low,
-                  loadingBuilder: (context, child, progress) {
-                    if (progress == null) return child;
-                    return ColoredBox(
-                      color: theme.disabledColor.withValues(alpha: 0.12),
-                      child: const Center(
-                        child: SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      ),
+                // Covers arrive as ~460px "extraLarge" images. Decoding them
+                // at card size (not full size) cuts memory and decode time,
+                // which is what makes fast scrolling through a grid janky.
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final dpr = MediaQuery.devicePixelRatioOf(context);
+                    final cacheWidth = constraints.maxWidth.isFinite
+                        ? (constraints.maxWidth * dpr).ceil().clamp(120, 640).toInt()
+                        : null;
+                    return Image.network(
+                      url,
+                      fit: BoxFit.cover,
+                      cacheWidth: cacheWidth,
+                      gaplessPlayback: true,
+                      filterQuality: FilterQuality.low,
+                      loadingBuilder: (context, child, progress) {
+                        if (progress == null) return child;
+                        return ColoredBox(
+                          color: theme.disabledColor.withValues(alpha: 0.12),
+                          child: const Center(
+                            child: SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          ),
+                        );
+                      },
+                      errorBuilder: (context, error, stack) =>
+                          _PosterPlaceholder(media: media),
                     );
                   },
-                  errorBuilder: (context, error, stack) =>
-                      _PosterPlaceholder(media: media),
                 ),
               ),
             // Bottom gradient scrim for legibility + premium depth.
@@ -145,17 +178,21 @@ class _PosterImage extends StatelessWidget {
             ),
             if (media.averageScore != null && media.averageScore! > 0)
               Positioned(
-                left: Tokens.space8,
-                top: Tokens.space8,
-                child: _ScoreBadge(score: media.averageScore!),
+                left: compact ? Tokens.space4 + 2 : Tokens.space8,
+                top: compact ? Tokens.space4 + 2 : Tokens.space8,
+                child: _ScoreBadge(
+                  score: media.averageScore!,
+                  compact: compact,
+                ),
               ),
             if (media.nextAiringEpisode != null)
               Positioned(
-                right: Tokens.space8,
-                bottom: Tokens.space8,
+                right: compact ? Tokens.space4 + 2 : Tokens.space8,
+                bottom: compact ? Tokens.space4 + 2 : Tokens.space8,
                 child: _AiringBadge(
                   episode: media.nextAiringEpisode!.episode,
                   airingAt: media.nextAiringEpisode!.airingAt,
+                  compact: compact,
                 ),
               ),
             ],
@@ -215,16 +252,17 @@ class _PosterPlaceholder extends StatelessWidget {
 }
 
 class _ScoreBadge extends StatelessWidget {
-  const _ScoreBadge({required this.score});
+  const _ScoreBadge({required this.score, this.compact = false});
 
   final int score;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: Tokens.space8,
-        vertical: Tokens.space4,
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 6 : Tokens.space8,
+        vertical: compact ? 2 : Tokens.space4,
       ),
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.62),
@@ -234,12 +272,16 @@ class _ScoreBadge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.star_rounded, size: 13, color: Tokens.warning),
-          const SizedBox(width: Tokens.space4),
+          Icon(
+            Icons.star_rounded,
+            size: compact ? 11 : 13,
+            color: Tokens.warning,
+          ),
+          SizedBox(width: compact ? 2 : Tokens.space4),
           Text(
             Formatters.score(score),
-            style: const TextStyle(
-              fontSize: 11,
+            style: TextStyle(
+              fontSize: compact ? 10 : 11,
               fontWeight: FontWeight.w700,
               color: Colors.white,
             ),
@@ -251,17 +293,22 @@ class _ScoreBadge extends StatelessWidget {
 }
 
 class _AiringBadge extends StatelessWidget {
-  const _AiringBadge({required this.episode, required this.airingAt});
+  const _AiringBadge({
+    required this.episode,
+    required this.airingAt,
+    this.compact = false,
+  });
 
   final int episode;
   final int airingAt;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: Tokens.space8,
-        vertical: Tokens.space4,
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 6 : Tokens.space8,
+        vertical: compact ? 2 : Tokens.space4,
       ),
       decoration: BoxDecoration(
         gradient: Tokens.brandGradient,
@@ -272,8 +319,8 @@ class _AiringBadge extends StatelessWidget {
         'EP $episode • ${Formatters.timeUntil(airingAt)}',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(
-          fontSize: 10,
+        style: TextStyle(
+          fontSize: compact ? 9 : 10,
           fontWeight: FontWeight.w800,
           letterSpacing: 0.3,
           color: Colors.white,

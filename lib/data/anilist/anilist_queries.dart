@@ -70,33 +70,26 @@ query (\$page: Int, \$perPage: Int, \$type: MediaType) {
 }''';
 
 /// Browse with the filter set offered by the UI.
-String browseQuery({required bool detail}) => detail
-    ? '''
+///
+/// `isAdult` is a variable that defaults to false: only the Anime/Manga
+/// browse screen's "Explicitly" filter ever sends true.
+String browseQuery({required bool detail}) =>
+    '''
 query (
   \$page: Int, \$perPage: Int, \$type: MediaType, \$sort: [MediaSort],
   \$search: String, \$genre: String, \$status: MediaStatus,
-  \$format: MediaFormat, \$season: MediaSeason, \$seasonYear: Int
+  \$format: MediaFormat, \$season: MediaSeason, \$seasonYear: Int,
+  \$source: MediaSource, \$countryOfOrigin: CountryCode, \$minScore: Int,
+  \$isAdult: Boolean = false
 ) {
   Page(page: \$page, perPage: \$perPage) {
     pageInfo { currentPage hasNextPage total }
     media(
-      type: \$type, isAdult: false, sort: \$sort, search: \$search, genre: \$genre,
-      status: \$status, format: \$format, season: \$season, seasonYear: \$seasonYear
-    ) { $kMediaDetailSelection }
-  }
-}'''
-    : '''
-query (
-  \$page: Int, \$perPage: Int, \$type: MediaType, \$sort: [MediaSort],
-  \$search: String, \$genre: String, \$status: MediaStatus,
-  \$format: MediaFormat, \$season: MediaSeason, \$seasonYear: Int
-) {
-  Page(page: \$page, perPage: \$perPage) {
-    pageInfo { currentPage hasNextPage total }
-    media(
-      type: \$type, isAdult: false, sort: \$sort, search: \$search, genre: \$genre,
-      status: \$status, format: \$format, season: \$season, seasonYear: \$seasonYear
-    ) { $kMediaListSelection }
+      type: \$type, isAdult: \$isAdult, sort: \$sort, search: \$search,
+      genre: \$genre, status: \$status, format: \$format, season: \$season,
+      seasonYear: \$seasonYear, source: \$source,
+      countryOfOrigin: \$countryOfOrigin, averageScore_greater: \$minScore
+    ) { ${detail ? kMediaDetailSelection : kMediaListSelection} }
   }
 }''';
 

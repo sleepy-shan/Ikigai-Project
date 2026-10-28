@@ -245,9 +245,11 @@ class _MediaGridState extends State<MediaGrid> {
                     ),
                   );
                 }
+                final media = widget.items[index];
                 return RevealOnScroll(
                   index: index,
-                  child: PosterCard(media: widget.items[index]),
+                  revealKey: 'poster:${media.type.name}:${media.id}',
+                  child: PosterCard(media: media),
                 );
               },
             ),
@@ -358,9 +360,11 @@ class SliverPosterGrid extends StatelessWidget {
                   ),
                 );
               }
+              final media = items[index];
               return RevealOnScroll(
                 index: index,
-                child: PosterCard(media: items[index]),
+                revealKey: 'poster:${media.type.name}:${media.id}',
+                child: PosterCard(media: media),
               );
             },
           ),
