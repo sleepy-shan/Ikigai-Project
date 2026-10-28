@@ -109,17 +109,36 @@ class SmoothCustomScrollView extends StatelessWidget {
 /// Optimized: uses implicit animations (no per-item [AnimationController] /
 /// [Ticker]), so hundreds of grid items cost ~zero tickers. The stagger
 /// timer is guarded against use-after-dispose.
+///
+/// Pass a [revealKey] (e.g. the title id) so an item only animates the first
+/// time it appears. Virtualized grids rebuild items as they scroll back into
+/// view, and replaying the fade-in each time makes fast scrolling flicker.
 class RevealOnScroll extends StatefulWidget {
   const RevealOnScroll({
     required this.child,
     this.index = 0,
     this.slide = 18.0,
+    this.revealKey,
     super.key,
   });
 
   final Widget child;
   final int index;
   final double slide;
+
+  /// Identity used to remember that this item has already been revealed.
+  final Object? revealKey;
+
+  /// Keys already revealed (insertion ordered, bounded).
+  static final Set<Object> _seen = <Object>{};
+  static const int _maxSeen = 800;
+
+  static void _remember(Object? key) {
+    if (key == null) return;
+    _seen.remove(key);
+    _seen.add(key);
+    if (_seen.length > _maxSeen) _seen.remove(_seen.first);
+  }
 
   @override
   State<RevealOnScroll> createState() => _RevealOnScrollState();
@@ -132,14 +151,23 @@ class _RevealOnScrollState extends State<RevealOnScroll> {
   @override
   void initState() {
     super.initState();
+    final key = widget.revealKey;
+    // Already seen: show immediately, no fade, no timer.
+    if (key != null && RevealOnScroll._seen.contains(key)) {
+      _visible = true;
+      return;
+    }
     // Stagger start so items cascade in. Capped at 8 steps to bound
     // total delay on long grids.
-    final delay = Duration(milliseconds: (widget.index % 8) * 45);
+    final delay = Duration(milliseconds: (widget.index % 8) * 40);
     if (delay == Duration.zero) {
       _visible = true;
+      RevealOnScroll._remember(key);
     } else {
       Future.delayed(delay, () {
-        if (!_disposed && mounted) setState(() => _visible = true);
+        if (_disposed || !mounted) return;
+        RevealOnScroll._remember(key);
+        setState(() => _visible = true);
       });
     }
   }
@@ -154,11 +182,11 @@ class _RevealOnScrollState extends State<RevealOnScroll> {
   Widget build(BuildContext context) {
     return AnimatedOpacity(
       opacity: _visible ? 1.0 : 0.0,
-      duration: const Duration(milliseconds: 380),
+      duration: const Duration(milliseconds: 320),
       curve: Curves.easeOutCubic,
       child: AnimatedSlide(
         offset: _visible ? Offset.zero : Offset(0, widget.slide / 100),
-        duration: const Duration(milliseconds: 380),
+        duration: const Duration(milliseconds: 320),
         curve: Curves.easeOutCubic,
         child: widget.child,
       ),

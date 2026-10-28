@@ -66,9 +66,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               actionPath: Routes.lists,
             ),
           ),
-          SliverToBoxAdapter(
-            child: _ContinueRail(entries: continueEntries),
-          ),
+          SliverToBoxAdapter(child: _ContinueRail(entries: continueEntries)),
         ],
         if (isAnime) ...[
           // ---- Releasing today ------------------------------------------
@@ -381,9 +379,12 @@ class _SpotlightCarousel extends ConsumerWidget {
           padEnds: true,
           // Peek the neighbours so the rotate effect is visible.
           viewportFraction: isWide ? 0.85 : 0.92,
+          physics: SmoothScrollPhysics(),
           // TODO: apply rotate strength 1.10 once the parameter name is
           // confirmed from CarouselEffect.rotate's signature.
+
           effect: const CarouselEffect.rotate(),
+
           autoPlay: const CarouselAutoPlay(interval: _autoAdvance),
           indicator: CarouselIndicator(
             painter: CircularWaveIndicator(
@@ -391,7 +392,7 @@ class _SpotlightCarousel extends ConsumerWidget {
                 activeColor: theme.colorScheme.primary,
               ),
             ),
-            placement: CarouselIndicatorPlacement.below,
+            placement: CarouselIndicatorPlacement.overlay,
           ),
         );
       },
@@ -479,263 +480,270 @@ class _CarouselCard extends StatelessWidget {
             width: double.infinity,
             child: Stack(
               children: [
-              // Backdrop.
-              if (bg.isNotEmpty)
-                Positioned.fill(
-                  child: Image.network(
-                    bg,
-                    fit: BoxFit.cover,
-                    errorBuilder: (c, e, s) => Container(
+                // Backdrop.
+                if (bg.isNotEmpty)
+                  Positioned.fill(
+                    child: Image.network(
+                      bg,
+                      fit: BoxFit.cover,
+                      errorBuilder: (c, e, s) => Container(
+                        decoration: const BoxDecoration(
+                          gradient: Tokens.heroGradient,
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  Positioned.fill(
+                    child: Container(
                       decoration: const BoxDecoration(
                         gradient: Tokens.heroGradient,
                       ),
                     ),
                   ),
-                )
-              else
+                // Scrims.
                 Positioned.fill(
-                  child: Container(
-                    decoration: const BoxDecoration(
-                      gradient: Tokens.heroGradient,
-                    ),
-                  ),
-                ),
-              // Scrims.
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.centerLeft,
-                      end: Alignment.centerRight,
-                      colors: [
-                        Colors.black.withValues(alpha: 0.82),
-                        Colors.black.withValues(alpha: 0.45),
-                        Colors.black.withValues(alpha: 0.05),
-                      ],
-                      stops: const [0.0, 0.55, 1.0],
-                    ),
-                  ),
-                ),
-              ),
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Tokens.brand.withValues(alpha: 0.22),
-                        Colors.transparent,
-                        Colors.black.withValues(alpha: 0.35),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              // Content (bottom-anchored so every slide is the same height).
-              Positioned.fill(
-                child: Padding(
-                  padding: EdgeInsets.all(isWide ? 32 : 20),
-                  child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    if (isWide) ...[
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(Tokens.radiusLg),
-                        child: media.coverUrl.isEmpty
-                            ? const SizedBox(width: 150, height: 215)
-                            : Image.network(
-                                media.coverUrl,
-                                width: 150,
-                                height: 215,
-                                fit: BoxFit.cover,
-                              ),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.82),
+                          Colors.black.withValues(alpha: 0.45),
+                          Colors.black.withValues(alpha: 0.05),
+                        ],
+                        stops: const [0.0, 0.55, 1.0],
                       ),
-                      const SizedBox(width: 24),
-                    ],
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // Wrap so badges never clip on 320px phones.
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 5,
-                                ),
-                                decoration: BoxDecoration(
-                                  gradient: Tokens.brandGradient,
-                                  borderRadius: BorderRadius.circular(
-                                    Tokens.radiusPill,
+                    ),
+                  ),
+                ),
+                Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Tokens.brand.withValues(alpha: 0.22),
+                          Colors.transparent,
+                          Colors.black.withValues(alpha: 0.35),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                // Content (bottom-anchored so every slide is the same height).
+                Positioned.fill(
+                  child: Padding(
+                    padding: EdgeInsets.all(isWide ? 32 : 20),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        if (isWide) ...[
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(
+                              Tokens.radiusLg,
+                            ),
+                            child: media.coverUrl.isEmpty
+                                ? const SizedBox(width: 150, height: 215)
+                                : Image.network(
+                                    media.coverUrl,
+                                    width: 150,
+                                    height: 215,
+                                    fit: BoxFit.cover,
                                   ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(
-                                      Icons.local_fire_department_rounded,
-                                      size: 13,
-                                      color: Colors.white,
+                          ),
+                          const SizedBox(width: 24),
+                        ],
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // Wrap so badges never clip on 320px phones.
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 5,
                                     ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      'SPOTLIGHT #$rank • TRENDING',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: 1.2,
-                                        shadows: [
-                                          Shadow(
-                                            blurRadius: 8,
-                                            color: Color(0x88000000),
+                                    decoration: BoxDecoration(
+                                      gradient: Tokens.brandGradient,
+                                      borderRadius: BorderRadius.circular(
+                                        Tokens.radiusPill,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(
+                                          Icons.local_fire_department_rounded,
+                                          size: 13,
+                                          color: Colors.white,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          'SPOTLIGHT #$rank • TRENDING',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w800,
+                                            letterSpacing: 1.2,
+                                            shadows: [
+                                              Shadow(
+                                                blurRadius: 8,
+                                                color: Color(0x88000000),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (media.averageScore != null &&
+                                      media.averageScore! > 0)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 5,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withValues(
+                                          alpha: 0.14,
+                                        ),
+                                        borderRadius: BorderRadius.circular(
+                                          Tokens.radiusPill,
+                                        ),
+                                        border: Border.all(
+                                          color: Colors.white.withValues(
+                                            alpha: 0.25,
+                                          ),
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(
+                                            Icons.star_rounded,
+                                            size: 14,
+                                            color: Tokens.warning,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            Formatters.score(
+                                              media.averageScore,
+                                            ),
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                              shadows: [
+                                                Shadow(
+                                                  blurRadius: 8,
+                                                  color: Color(0x88000000),
+                                                ),
+                                              ],
+                                            ),
                                           ),
                                         ],
                                       ),
                                     ),
-                                  ],
-                                ),
+                                ],
                               ),
-                              if (media.averageScore != null &&
-                                  media.averageScore! > 0)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 5,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.14),
-                                    borderRadius: BorderRadius.circular(
-                                      Tokens.radiusPill,
-                                    ),
-                                    border: Border.all(
-                                      color: Colors.white.withValues(
-                                        alpha: 0.25,
-                                      ),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(
-                                        Icons.star_rounded,
-                                        size: 14,
-                                        color: Tokens.warning,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        Formatters.score(media.averageScore),
-                                        style: const TextStyle(
+                              const SizedBox(height: 12),
+                              Text(
+                                media.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style:
+                                    (isWide
+                                            ? theme.textTheme.displaySmall
+                                            : theme.textTheme.headlineMedium)
+                                        ?.copyWith(
                                           color: Colors.white,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                          shadows: [
+                                          fontWeight: FontWeight.w800,
+                                          letterSpacing: -0.5,
+                                          height: 1.1,
+                                          shadows: const [
                                             Shadow(
-                                              blurRadius: 8,
-                                              color: Color(0x88000000),
+                                              blurRadius: 12,
+                                              color: Color(0x99000000),
                                             ),
                                           ],
                                         ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            media.title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: (isWide
-                                    ? theme.textTheme.displaySmall
-                                    : theme.textTheme.headlineMedium)
-                                ?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.5,
-                              height: 1.1,
-                              shadows: const [
-                                Shadow(
-                                  blurRadius: 12,
-                                  color: Color(0x99000000),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          if (media.genres.isNotEmpty)
-                            Wrap(
-                              spacing: 6,
-                              runSpacing: 6,
-                              children: [
-                                for (final g in media.genres.take(3))
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withValues(
-                                        alpha: 0.12,
-                                      ),
-                                      borderRadius: BorderRadius.circular(
-                                        Tokens.radiusPill,
-                                      ),
-                                      border: Border.all(
-                                        color: Colors.white.withValues(
-                                          alpha: 0.18,
+                              ),
+                              const SizedBox(height: 8),
+                              if (media.genres.isNotEmpty)
+                                Wrap(
+                                  spacing: 6,
+                                  runSpacing: 6,
+                                  children: [
+                                    for (final g in media.genres.take(3))
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withValues(
+                                            alpha: 0.12,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            Tokens.radiusPill,
+                                          ),
+                                          border: Border.all(
+                                            color: Colors.white.withValues(
+                                              alpha: 0.18,
+                                            ),
+                                          ),
+                                        ),
+                                        child: Text(
+                                          g,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                    child: Text(
-                                      g,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                      ),
+                                  ],
+                                ),
+                              const SizedBox(height: 16),
+                              Wrap(
+                                spacing: 10,
+                                runSpacing: 10,
+                                children: [
+                                  _HeroButton(
+                                    label: 'View details',
+                                    icon: Icons.play_arrow_rounded,
+                                    filled: true,
+                                    onTap: () => context.go(
+                                      Routes.mediaDetail(media.type, media.id),
                                     ),
                                   ),
-                              ],
-                            ),
-                          const SizedBox(height: 16),
-                          Wrap(
-                            spacing: 10,
-                            runSpacing: 10,
-                            children: [
-                              _HeroButton(
-                                label: 'View details',
-                                icon: Icons.play_arrow_rounded,
-                                filled: true,
-                                onTap: () => context.go(
-                                  Routes.mediaDetail(media.type, media.id),
-                                ),
-                              ),
-                              _HeroButton(
-                                label: 'Browse anime',
-                                icon: Icons.explore_outlined,
-                                filled: false,
-                                onTap: () => context.go(Routes.anime),
+                                  _HeroButton(
+                                    label: 'Browse anime',
+                                    icon: Icons.explore_outlined,
+                                    filled: false,
+                                    onTap: () => context.go(Routes.anime),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
-            ],
           ),
-        ),
         ),
       ),
     );
@@ -770,10 +778,7 @@ class _HeroButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(Tokens.radiusPill),
             onTap: onTap,
             child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 12,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -882,8 +887,7 @@ class _AiringTodayCard extends StatelessWidget {
     );
     return InkWell(
       borderRadius: BorderRadius.circular(Tokens.radiusLg),
-      onTap: () =>
-          context.go(Routes.mediaDetail(item.mediaType, item.mediaId)),
+      onTap: () => context.go(Routes.mediaDetail(item.mediaType, item.mediaId)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
@@ -1127,7 +1131,9 @@ class _ContinueCard extends ConsumerWidget {
                             entry.coverUrl!,
                             fit: BoxFit.cover,
                             errorBuilder: (context, error, stack) => ColoredBox(
-                              color: theme.disabledColor.withValues(alpha: 0.12),
+                              color: theme.disabledColor.withValues(
+                                alpha: 0.12,
+                              ),
                             ),
                           ),
                   ),
