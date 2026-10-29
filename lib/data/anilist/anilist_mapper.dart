@@ -199,10 +199,24 @@ abstract final class AniListMapper {
           airingAt: (item['airingAt'] as num?)?.toInt() ?? 0,
           totalEpisodes: (media['episodes'] as num?)?.toInt(),
           averageScore: (media['averageScore'] as num?)?.toInt(),
+          popularity: (media['popularity'] as num?)?.toInt(),
+          format: MediaFormat.fromWire(media['format'] as String?),
+          platform: _streamingSite(media['externalLinks']),
         ),
       );
     }
     return List.unmodifiable(out);
+  }
+
+  /// First enabled streaming link's site name ("Crunchyroll"), if any.
+  static String? _streamingSite(Object? raw) {
+    if (raw is! List) return null;
+    for (final link in raw.whereType<Map>()) {
+      if (link['type'] != 'STREAMING' || link['isDisabled'] == true) continue;
+      final site = (link['site'] as String?)?.trim();
+      if (site != null && site.isNotEmpty) return site;
+    }
+    return null;
   }
 
   /// Parses a `Page.characters` payload for the search tab.
@@ -211,18 +225,18 @@ abstract final class AniListMapper {
     return raw
         .whereType<Map>()
         .map((item) {
-          final map = item.map(
-            (key, value) => MapEntry(key.toString(), value),
-          );
+          final map = item.map((key, value) => MapEntry(key.toString(), value));
           final id = (map['id'] as num?)?.toInt();
           if (id == null) return null;
-          final name = (map['name'] as Map?)?.map(
+          final name =
+              (map['name'] as Map?)?.map(
                 (key, value) => MapEntry(key.toString(), value),
               ) ??
               const {};
           final full = (name['full'] as String?)?.trim() ?? '';
           if (full.isEmpty) return null;
-          final image = (map['image'] as Map?)?.map(
+          final image =
+              (map['image'] as Map?)?.map(
                 (key, value) => MapEntry(key.toString(), value),
               ) ??
               const {};
@@ -244,22 +258,23 @@ abstract final class AniListMapper {
     return raw
         .whereType<Map>()
         .map((item) {
-          final map = item.map(
-            (key, value) => MapEntry(key.toString(), value),
-          );
+          final map = item.map((key, value) => MapEntry(key.toString(), value));
           final id = (map['id'] as num?)?.toInt();
           if (id == null) return null;
-          final name = (map['name'] as Map?)?.map(
+          final name =
+              (map['name'] as Map?)?.map(
                 (key, value) => MapEntry(key.toString(), value),
               ) ??
               const {};
           final full = (name['full'] as String?)?.trim() ?? '';
           if (full.isEmpty) return null;
-          final image = (map['image'] as Map?)?.map(
+          final image =
+              (map['image'] as Map?)?.map(
                 (key, value) => MapEntry(key.toString(), value),
               ) ??
               const {};
-          final occupations = (map['primaryOccupations'] as List?)
+          final occupations =
+              (map['primaryOccupations'] as List?)
                   ?.map((e) => e.toString().replaceAll('_', ' '))
                   .where((e) => e.trim().isNotEmpty)
                   .toList(growable: false) ??
@@ -283,9 +298,7 @@ abstract final class AniListMapper {
     return raw
         .whereType<Map>()
         .map((item) {
-          final map = item.map(
-            (key, value) => MapEntry(key.toString(), value),
-          );
+          final map = item.map((key, value) => MapEntry(key.toString(), value));
           final id = (map['id'] as num?)?.toInt();
           if (id == null) return null;
           final name = (map['name'] as String?)?.trim() ?? '';
@@ -307,7 +320,8 @@ abstract final class AniListMapper {
     int fallbackPage,
   ) {
     if (raw is! Map) return (page: fallbackPage, hasNextPage: false);
-    final info = (raw['pageInfo'] as Map?)?.map(
+    final info =
+        (raw['pageInfo'] as Map?)?.map(
           (key, value) => MapEntry(key.toString(), value),
         ) ??
         const {};
@@ -326,10 +340,10 @@ abstract final class AniListMapper {
     if (profile == null) return null;
     return PersonWorks(
       person: profile,
-      works: _mergeConnections(
-        [map['characterMedia'], map['staffMedia']],
-        fallbackPage,
-      ),
+      works: _mergeConnections([
+        map['characterMedia'],
+        map['staffMedia'],
+      ], fallbackPage),
     );
   }
 
@@ -357,9 +371,7 @@ abstract final class AniListMapper {
         id: id,
         nameFull: name,
         favourites: (map['favourites'] as num?)?.toInt() ?? 0,
-        role: map['isAnimationStudio'] == false
-            ? 'Studio'
-            : 'Animation studio',
+        role: map['isAnimationStudio'] == false ? 'Studio' : 'Animation studio',
       ),
       works: _mergeConnections([map['media']], fallbackPage),
     );
@@ -487,7 +499,9 @@ abstract final class AniListMapper {
       final map = _asMap(item);
       final genre = (map?['genre'] as String?)?.trim() ?? '';
       if (genre.isEmpty) continue;
-      out.add(GenreStat(genre: genre, count: (map?['count'] as num?)?.toInt() ?? 0));
+      out.add(
+        GenreStat(genre: genre, count: (map?['count'] as num?)?.toInt() ?? 0),
+      );
     }
     return out;
   }
