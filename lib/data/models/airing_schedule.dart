@@ -12,6 +12,9 @@ class AiringScheduleItem {
     this.coverUrl,
     this.totalEpisodes,
     this.averageScore,
+    this.popularity,
+    this.format = MediaFormat.unknown,
+    this.platform,
   });
 
   final int id;
@@ -31,4 +34,15 @@ class AiringScheduleItem {
 
   /// AniList average score (0-100 scale), when known.
   final int? averageScore;
+
+  /// AniList popularity (number of users with the title on a list); used by
+  /// the calendar's "Popularity" sort.
+  final int? popularity;
+
+  /// TV, ONA, OVA, ... shown as the badge on the poster.
+  final MediaFormat format;
+
+  /// Name of the first streaming site AniList lists for the title
+  /// ("Crunchyroll", "Netflix", ...), when there is one.
+  final String? platform;
 }

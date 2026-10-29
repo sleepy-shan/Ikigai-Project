@@ -128,9 +128,12 @@ query (\$page: Int, \$perPage: Int, \$airingAt_greater: Int, \$airingAt_lesser: 
         type
         isAdult
         episodes
+        format
         averageScore
+        popularity
         title { romaji english native }
         coverImage { large }
+        externalLinks { site type isDisabled }
       }
     }
   }
@@ -235,7 +238,8 @@ const String kMediaCardSelection = '''
 /// Voice actors are linked to media through the characters they voice
 /// (`characterMedia`), while directors/mangaka/composers use `staffMedia`,
 /// so both connections are requested and merged by the mapper.
-const String kStaffWorksQuery = '''
+const String kStaffWorksQuery =
+    '''
 query (\$id: Int, \$page: Int, \$perPage: Int) {
   Staff(id: \$id) {
     id
@@ -255,7 +259,8 @@ query (\$id: Int, \$page: Int, \$perPage: Int) {
 }''';
 
 /// Character profile plus the series they appear in.
-const String kCharacterWorksQuery = '''
+const String kCharacterWorksQuery =
+    '''
 query (\$id: Int, \$page: Int, \$perPage: Int) {
   Character(id: \$id) {
     id
@@ -270,7 +275,8 @@ query (\$id: Int, \$page: Int, \$perPage: Int) {
 }''';
 
 /// Studio profile plus the titles it produced (most popular first).
-const String kStudioWorksQuery = '''
+const String kStudioWorksQuery =
+    '''
 query (\$id: Int, \$page: Int, \$perPage: Int) {
   Studio(id: \$id) {
     id
@@ -286,7 +292,8 @@ query (\$id: Int, \$page: Int, \$perPage: Int) {
 
 /// The signed-in user's recent notifications about titles: new episodes,
 /// newly added related titles and site-data changes. Requires a token.
-const String kNotificationsQuery = '''
+const String kNotificationsQuery =
+    '''
 query (\$perPage: Int) {
   Page(page: 1, perPage: \$perPage) {
     notifications(type_in: [AIRING, RELATED_MEDIA_ADDITION, MEDIA_DATA_CHANGE]) {
@@ -358,7 +365,8 @@ query {
 /// `user.mediaListOptions.scoreFormat` is requested because every entry's
 /// `score` is expressed in that format (100-point, 10-point, 5-star, smileys),
 /// so it is meaningless without it.
-const String kMediaListCollectionQuery = '''
+const String kMediaListCollectionQuery =
+    '''
 query (\$userId: Int, \$type: MediaType, \$status: MediaListStatus) {
   MediaListCollection(userId: \$userId, type: \$type, status: \$status) {
     user { mediaListOptions { scoreFormat } }
@@ -379,7 +387,8 @@ query (\$userId: Int, \$type: MediaType, \$status: MediaListStatus) {
 }''';
 
 /// The user's favourited anime (a connection separate from list statuses).
-const String kFavouriteAnimeQuery = '''
+const String kFavouriteAnimeQuery =
+    '''
 query (\$userId: Int, \$page: Int, \$perPage: Int) {
   User(id: \$userId) {
     favourites {
