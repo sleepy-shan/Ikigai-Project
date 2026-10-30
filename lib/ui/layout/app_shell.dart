@@ -91,6 +91,7 @@ class AppShell extends ConsumerWidget {
     // (desktop) and search button (phones) step aside while it is open.
     final onSearchPage = location == Routes.search;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final sidebarCollapsed = ref.watch(sidebarCollapsedProvider);
 
     // Background AniList sync failures (progress, status, score, delete) have
     // no screen of their own, so surface them once as a snackbar. The local
@@ -150,12 +151,35 @@ class AppShell extends ConsumerWidget {
                 Expanded(
                   child: isCompact
                       ? content
-                      : Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _Sidebar(activePath: activePath),
-                            Expanded(child: content),
-                          ],
+                      : LayoutBuilder(
+                          builder: (context, constraints) {
+                            // The page is laid out once, at the width it will
+                            // have when the sidebar settles, and then simply
+                            // slides along with the sidebar edge. Re-flowing a
+                            // whole page (grids, rails, sliver headers) on
+                            // every frame of the width animation was the lag.
+                            final settledWidth =
+                                constraints.maxWidth -
+                                (sidebarCollapsed
+                                    ? _sidebarCollapsedWidth
+                                    : _sidebarExpandedWidth);
+                            return Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                _Sidebar(activePath: activePath),
+                                Expanded(
+                                  child: ClipRect(
+                                    child: OverflowBox(
+                                      alignment: Alignment.topLeft,
+                                      minWidth: settledWidth,
+                                      maxWidth: settledWidth,
+                                      child: RepaintBoundary(child: content),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
                         ),
                 ),
               ],
@@ -425,31 +449,132 @@ class _SearchFieldState extends State<_SearchField> {
 const double _sidebarExpandedWidth = 232;
 const double _sidebarCollapsedWidth = 72;
 
+/// How long the sidebar takes to open or close.
+const Duration _sidebarDuration = Duration(milliseconds: 300);
+
+/// Width of the label slot inside a sidebar row. Labels are always laid out
+/// at this fixed width and merely clipped by the shrinking sidebar, so text is
+/// never re-measured while the width animates.
+const double _sidebarLabelWidth = 150;
+
 /// Desktop sidebar: Home, Anime, Manga, Calendar, Watchlist, History,
 /// Settings. Collapses to icons; the choice is remembered.
-class _Sidebar extends ConsumerWidget {
+///
+/// One [AnimationController] drives everything (ease-in-out): the width and
+/// the label fade. The rows are built once and only the width wrapper and the
+/// label opacity update per frame.
+class _Sidebar extends ConsumerStatefulWidget {
   const _Sidebar({required this.activePath});
 
   final String? activePath;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_Sidebar> createState() => _SidebarState();
+}
+
+class _SidebarState extends ConsumerState<_Sidebar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _width;
+  late final Animation<double> _labelOpacity;
+
+  @override
+  void initState() {
+    super.initState();
+    final collapsed = ref.read(sidebarCollapsedProvider);
+    _controller = AnimationController(
+      vsync: this,
+      duration: _sidebarDuration,
+      value: collapsed ? 0 : 1,
+    );
+    _width = CurvedAnimation(parent: _controller, curve: Curves.easeInOut);
+    // Labels fade in over the second half of opening and out over the first
+    // half of closing, so text never sits cramped in a half-open sidebar.
+    _labelOpacity = CurvedAnimation(
+      parent: _controller,
+      curve: const Interval(0.5, 1.0, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final collapsed = ref.watch(sidebarCollapsedProvider);
+    final activePath = widget.activePath;
+
+    ref.listen<bool>(sidebarCollapsedProvider, (previous, next) {
+      if (next) {
+        _controller.reverse();
+      } else {
+        _controller.forward();
+      }
+    });
 
     Widget item(_Destination d) => _SidebarItem(
       icon: activePath == d.path ? d.activeIcon : d.icon,
       label: d.label,
       selected: activePath == d.path,
       collapsed: collapsed,
+      labelOpacity: _labelOpacity,
       onTap: () => context.go(d.path),
     );
 
-    return AnimatedContainer(
-      duration: Tokens.durationMedium,
-      curve: Tokens.curveSmooth,
-      width: collapsed ? _sidebarCollapsedWidth : _sidebarExpandedWidth,
+    final rows = Column(
+      children: [
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: Tokens.space12,
+            ),
+            children: [
+              for (final d in _mainDestinations) item(d),
+              const Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: Tokens.space8,
+                  vertical: Tokens.space8,
+                ),
+                child: Divider(height: 1),
+              ),
+              item(_historyDestination),
+              _SidebarItem(
+                icon: Icons.settings_outlined,
+                label: 'Settings',
+                selected: false,
+                collapsed: collapsed,
+                labelOpacity: _labelOpacity,
+                onTap: () => showSettingsDialog(context),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 0, 10, Tokens.space12),
+          child: _SidebarItem(
+            icon: collapsed
+                ? Icons.keyboard_double_arrow_right_rounded
+                : Icons.keyboard_double_arrow_left_rounded,
+            label: 'Collapse',
+            tooltip: collapsed ? 'Expand sidebar' : 'Collapse sidebar',
+            selected: false,
+            collapsed: collapsed,
+            labelOpacity: _labelOpacity,
+            onTap: () => ref.read(sidebarCollapsedProvider.notifier).toggle(),
+          ),
+        ),
+      ],
+    );
+
+    // Fixed-width inner box: the rows keep their expanded layout and are
+    // clipped by the animated outer width, so nothing reflows mid-animation.
+    final panel = DecoratedBox(
       decoration: BoxDecoration(
         color: isDark
             ? const Color(0xFF0E1515).withValues(alpha: 0.72)
@@ -463,49 +588,24 @@ class _Sidebar extends ConsumerWidget {
         ),
       ),
       child: ClipRect(
-        child: Column(
-          children: [
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: Tokens.space12,
-                ),
-                children: [
-                  for (final d in _mainDestinations) item(d),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: Tokens.space8,
-                      vertical: Tokens.space8,
-                    ),
-                    child: Divider(height: 1),
-                  ),
-                  item(_historyDestination),
-                  _SidebarItem(
-                    icon: Icons.settings_outlined,
-                    label: 'Settings',
-                    selected: false,
-                    collapsed: collapsed,
-                    onTap: () => showSettingsDialog(context),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, Tokens.space12),
-              child: _SidebarItem(
-                icon: collapsed
-                    ? Icons.keyboard_double_arrow_right_rounded
-                    : Icons.keyboard_double_arrow_left_rounded,
-                label: 'Collapse',
-                tooltip: collapsed ? 'Expand sidebar' : 'Collapse sidebar',
-                selected: false,
-                collapsed: collapsed,
-                onTap: () =>
-                    ref.read(sidebarCollapsedProvider.notifier).toggle(),
-              ),
-            ),
-          ],
+        child: OverflowBox(
+          alignment: Alignment.topLeft,
+          minWidth: _sidebarExpandedWidth,
+          maxWidth: _sidebarExpandedWidth,
+          child: rows,
+        ),
+      ),
+    );
+
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _width,
+        child: panel,
+        builder: (context, child) => SizedBox(
+          width:
+              _sidebarCollapsedWidth +
+              (_sidebarExpandedWidth - _sidebarCollapsedWidth) * _width.value,
+          child: child,
         ),
       ),
     );
@@ -520,6 +620,7 @@ class _SidebarItem extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.collapsed,
+    required this.labelOpacity,
     required this.onTap,
     this.tooltip,
   });
@@ -528,6 +629,9 @@ class _SidebarItem extends StatelessWidget {
   final String label;
   final bool selected;
   final bool collapsed;
+
+  /// Driven by the sidebar's controller: 0 collapsed, 1 expanded.
+  final Animation<double> labelOpacity;
   final VoidCallback onTap;
 
   /// Overrides the collapsed-state tooltip (defaults to [label]).
@@ -563,22 +667,26 @@ class _SidebarItem extends StatelessWidget {
                   const SizedBox(width: 15),
                   Icon(icon, size: 22, color: iconColor),
                   Expanded(
-                    child: AnimatedOpacity(
-                      duration: Tokens.durationFast,
-                      opacity: collapsed ? 0 : 1,
-                      child: Padding(
-                        padding: const EdgeInsets.only(left: Tokens.space12),
-                        child: Text(
-                          label,
-                          maxLines: 1,
-                          softWrap: false,
-                          overflow: TextOverflow.clip,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: selected
-                                ? FontWeight.w700
-                                : FontWeight.w500,
-                            color: textColor,
+                    child: FadeTransition(
+                      opacity: labelOpacity,
+                      child: OverflowBox(
+                        alignment: Alignment.centerLeft,
+                        minWidth: _sidebarLabelWidth,
+                        maxWidth: _sidebarLabelWidth,
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: Tokens.space12),
+                          child: Text(
+                            label,
+                            maxLines: 1,
+                            softWrap: false,
+                            overflow: TextOverflow.clip,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: selected
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                              color: textColor,
+                            ),
                           ),
                         ),
                       ),

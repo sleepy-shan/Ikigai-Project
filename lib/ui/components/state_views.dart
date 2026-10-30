@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:skeletonizer/skeletonizer.dart';
+import 'package:shimmer/shimmer.dart';
 
 import '../../core/theme/design_tokens.dart';
 import '../../state/load_state.dart';
@@ -180,40 +180,42 @@ class EmptyView extends StatelessWidget {
   }
 }
 
-/// Shimmer used by every skeleton in the app, tinted from the active theme
-/// (neutral base, primary-tinted highlight) so it reads in light and dark.
-PaintingEffect skeletonEffect(BuildContext context) {
-  final theme = Theme.of(context);
-  return ShimmerEffect(
-    baseColor: theme.disabledColor.withValues(alpha: 0.14),
-    highlightColor: theme.colorScheme.primary.withValues(alpha: 0.22),
-    duration: const Duration(milliseconds: 1400),
-  );
-}
-
-/// Wraps a placeholder layout in an always-on [Skeletonizer].
+/// One shimmer sweep shared by every bone underneath it, tinted from the
+/// active theme (neutral base, primary-tinted highlight) so it reads in light
+/// and dark.
 ///
-/// The layouts below are ordinary widgets filled with dummy text; Skeletonizer
-/// turns every text run and decorated box into a shimmering bone, so the
-/// skeleton always matches the real card's proportions.
-class _SkeletonScope extends StatelessWidget {
-  const _SkeletonScope({required this.child});
+/// Built on `package:shimmer`: the shimmer paints its gradient through the
+/// alpha of its child, so everything inside must be solid [SkeletonBone]s.
+/// Wrap a whole grid or rail in a single [SkeletonShimmer] rather than one per
+/// card — that keeps a single animation ticker per skeleton.
+class SkeletonShimmer extends StatelessWidget {
+  const SkeletonShimmer({required this.child, this.enabled = true, super.key});
 
   final Widget child;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
-    return Skeletonizer(
-      enabled: true,
-      effect: skeletonEffect(context),
+    final theme = Theme.of(context);
+    return Shimmer.fromColors(
+      baseColor: theme.disabledColor.withValues(alpha: 0.14),
+      highlightColor: theme.colorScheme.primary.withValues(alpha: 0.22),
+      period: const Duration(milliseconds: 1400),
+      enabled: enabled,
       child: child,
     );
   }
 }
 
-/// A rounded box that Skeletonizer paints as a bone.
-class _BoneBox extends StatelessWidget {
-  const _BoneBox({this.width, this.height, this.radius = Tokens.radiusMd});
+/// A solid rounded box. Placed under a [SkeletonShimmer] it becomes a
+/// shimmering bone; [width] / [height] of null fill the available space.
+class SkeletonBone extends StatelessWidget {
+  const SkeletonBone({
+    this.width,
+    this.height,
+    this.radius = Tokens.radiusMd,
+    super.key,
+  });
 
   final double? width;
   final double? height;
@@ -225,9 +227,26 @@ class _BoneBox extends StatelessWidget {
       width: width,
       height: height,
       decoration: BoxDecoration(
-        color: Colors.black12,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(radius),
       ),
+    );
+  }
+}
+
+/// A line of text as a bone: [fraction] of the available width, [height] tall.
+class SkeletonLine extends StatelessWidget {
+  const SkeletonLine({this.fraction = 1, this.height = 12, super.key});
+
+  final double fraction;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    return FractionallySizedBox(
+      alignment: Alignment.centerLeft,
+      widthFactor: fraction,
+      child: SkeletonBone(height: height, radius: 4),
     );
   }
 }
@@ -238,22 +257,14 @@ class _PosterSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
+    return const Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Expanded(child: _BoneBox(radius: Tokens.radiusLg)),
-        const SizedBox(height: Tokens.space12),
-        Text(
-          'Placeholder series title',
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: Tokens.space4),
-        Text('TV • 2024', maxLines: 1, style: theme.textTheme.labelSmall),
+        Expanded(child: SkeletonBone(radius: Tokens.radiusLg)),
+        SizedBox(height: Tokens.space12),
+        SkeletonLine(height: 14),
+        SizedBox(height: Tokens.space8),
+        SkeletonLine(fraction: 0.45, height: 10),
       ],
     );
   }
@@ -267,8 +278,8 @@ class LoadingHero extends StatelessWidget {
   Widget build(BuildContext context) {
     return const Padding(
       padding: EdgeInsets.fromLTRB(12, 0, 12, 4),
-      child: _SkeletonScope(
-        child: _BoneBox(height: 260, radius: Tokens.radiusXl),
+      child: SkeletonShimmer(
+        child: SkeletonBone(height: 260, radius: Tokens.radiusXl),
       ),
     );
   }
@@ -283,7 +294,7 @@ class LoadingRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _SkeletonScope(
+    return SkeletonShimmer(
       child: SizedBox(
         height: height,
         child: ListView.separated(
@@ -302,6 +313,55 @@ class LoadingRail extends StatelessWidget {
   }
 }
 
+/// Skeleton for the home "Releasing today" strip. Mirrors the real episode
+/// card exactly: a [coverHeight] cover, an 8px gap, a one-line title and a
+/// one-line time row, at [itemWidth] with the rail's own padding and gap, so
+/// the real cards replace it without any layout shift.
+class LoadingAiringRail extends StatelessWidget {
+  const LoadingAiringRail({
+    required this.height,
+    required this.itemWidth,
+    required this.coverHeight,
+    super.key,
+  });
+
+  final double height;
+  final double itemWidth;
+  final double coverHeight;
+
+  @override
+  Widget build(BuildContext context) {
+    return SkeletonShimmer(
+      child: SizedBox(
+        height: height,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          primary: false,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: Tokens.space16),
+          itemCount: 12,
+          separatorBuilder: (context, index) =>
+              const SizedBox(width: Tokens.railGap),
+          itemBuilder: (context, index) => SizedBox(
+            width: itemWidth,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SkeletonBone(height: coverHeight, radius: Tokens.radiusLg),
+                const SizedBox(height: Tokens.space8),
+                const SkeletonLine(height: 14),
+                const SizedBox(height: 6),
+                const SkeletonLine(fraction: 0.7, height: 10),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Vertical list-row skeletons (My Lists / profile lists).
 class LoadingListRows extends StatelessWidget {
   const LoadingListRows({this.count = 5, super.key});
@@ -310,8 +370,7 @@ class LoadingListRows extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return _SkeletonScope(
+    return SkeletonShimmer(
       child: ListView.separated(
         physics: const NeverScrollableScrollPhysics(),
         shrinkWrap: true,
@@ -323,21 +382,15 @@ class LoadingListRows extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: Tokens.space16),
           child: Row(
             children: [
-              const _BoneBox(width: 52, height: 76),
+              const SkeletonBone(width: 52, height: 76),
               const SizedBox(width: Tokens.space12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Placeholder series title here',
-                      style: theme.textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Watching • 4 / 12 episodes',
-                      style: theme.textTheme.bodySmall,
-                    ),
+                    SkeletonLine(fraction: 0.7, height: 16),
+                    SizedBox(height: 8),
+                    SkeletonLine(fraction: 0.45, height: 12),
                   ],
                 ),
               ),
@@ -355,8 +408,7 @@ class LoadingDetail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return _SkeletonScope(
+    return SkeletonShimmer(
       child: ListView(
         physics: const NeverScrollableScrollPhysics(),
         shrinkWrap: true,
@@ -365,32 +417,28 @@ class LoadingDetail extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              const _BoneBox(width: 132, height: 190),
+              const SkeletonBone(width: 132, height: 190),
               const SizedBox(width: Tokens.space16),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Placeholder series title',
-                      style: theme.textTheme.headlineSmall,
-                    ),
-                    const SizedBox(height: 8),
-                    Text('TV • 2024 • Finished', style: theme.textTheme.bodyMedium),
+                    SkeletonLine(fraction: 0.8, height: 24),
+                    SizedBox(height: 12),
+                    SkeletonLine(fraction: 0.5, height: 14),
                   ],
                 ),
               ),
             ],
           ),
           const SizedBox(height: Tokens.space24),
-          const _BoneBox(height: 44),
+          const SkeletonBone(height: 44),
           const SizedBox(height: Tokens.space12),
-          Text(
-            'Placeholder synopsis line one that runs the full width of the '
-            'page and wraps onto a second line, then a third line follows '
-            'it so the block reads like a real paragraph of text.',
-            style: theme.textTheme.bodyMedium,
-          ),
+          const SkeletonLine(height: 14),
+          const SizedBox(height: 8),
+          const SkeletonLine(height: 14),
+          const SizedBox(height: 8),
+          const SkeletonLine(fraction: 0.6, height: 14),
         ],
       ),
     );
@@ -416,7 +464,7 @@ class LoadingPosterGrid extends StatelessWidget {
                 Tokens.space32) /
             columns;
         final tileHeight = tileWidth / Tokens.posterAspect + kPosterTextHeight;
-        return _SkeletonScope(
+        return SkeletonShimmer(
           child: GridView.builder(
             padding: const EdgeInsets.all(Tokens.space16),
             physics: const NeverScrollableScrollPhysics(),
@@ -473,33 +521,20 @@ class CompactPosterSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
+    return const Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Expanded(child: _BoneBox(radius: Tokens.radiusMd)),
-        const SizedBox(height: Tokens.space8),
-        Text(
-          'Placeholder title',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.labelLarge?.copyWith(
-            fontWeight: FontWeight.w700,
-            fontSize: 12.5,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          'TV • 2024',
-          maxLines: 1,
-          style: theme.textTheme.labelSmall?.copyWith(fontSize: 10.5),
-        ),
+        Expanded(child: SkeletonBone(radius: Tokens.radiusMd)),
+        SizedBox(height: Tokens.space8),
+        SkeletonLine(height: 12),
+        SizedBox(height: 4),
+        SkeletonLine(fraction: 0.5, height: 9),
       ],
     );
   }
 }
 
-/// Shimmering skeleton page for the browse grid (Skeletonizer).
+/// Shimmering skeleton page for the browse grid (shimmer).
 class BrowseSkeletonGrid extends StatelessWidget {
   const BrowseSkeletonGrid({this.count = 24, super.key});
 
@@ -515,7 +550,7 @@ class BrowseSkeletonGrid extends StatelessWidget {
         final tileWidth =
             (width - (columns - 1) * gap - Tokens.space32) / columns;
         final tileHeight = tileWidth / Tokens.posterAspect + kBrowseTextHeight;
-        return _SkeletonScope(
+        return SkeletonShimmer(
           child: GridView.builder(
             padding: const EdgeInsets.symmetric(horizontal: Tokens.space16),
             physics: const NeverScrollableScrollPhysics(),

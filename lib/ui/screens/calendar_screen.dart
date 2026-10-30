@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:skeletonizer/skeletonizer.dart';
 
 import '../../core/theme/app_scroll.dart';
 import '../../core/theme/design_tokens.dart';
@@ -40,7 +39,7 @@ const double _cardHeight = 150;
 /// Layout follows the Schedule reference: title + time-zone picker, the
 /// Anime/Manga tabs with the week controls, a strip of seven day tiles, and a
 /// grid of release cards for the selected day with a sort control. While a
-/// week loads, the real card layout is rendered as a Skeletonizer skeleton.
+/// week loads, a shimmer skeleton with the real card's proportions is shown.
 class CalendarScreen extends ConsumerStatefulWidget {
   const CalendarScreen({this.initialTab, super.key});
 
@@ -208,10 +207,22 @@ class _Header extends ConsumerWidget {
                       ],
                     ),
                     const SizedBox(height: Tokens.space4),
-                    Skeletonizer(
-                      enabled: loading,
-                      effect: skeletonEffect(context),
-                      child: Text.rich(
+                    if (loading)
+                      const SizedBox(
+                        height: 20,
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: SkeletonShimmer(
+                            child: SkeletonBone(
+                              width: 240,
+                              height: 14,
+                              radius: 4,
+                            ),
+                          ),
+                        ),
+                      )
+                    else
+                      Text.rich(
                         TextSpan(
                           style: muted,
                           children: [
@@ -227,7 +238,6 @@ class _Header extends ConsumerWidget {
                           ],
                         ),
                       ),
-                    ),
                   ],
                 ),
               ),
@@ -855,19 +865,6 @@ class _ReleaseData {
     this.platform,
   });
 
-  /// Dummy content for the Skeletonizer skeleton: same shape as a real card.
-  static const placeholder = _ReleaseData(
-    mediaId: 0,
-    mediaType: MediaType.anime,
-    title: 'Placeholder series title that wraps',
-    primaryLabel: 'Episode 12',
-    secondaryLabel: '/ 24',
-    timeLabel: '12:00 PM',
-    formatBadge: 'TV',
-    score: 75,
-    platform: 'Crunchyroll',
-  );
-
   final int mediaId;
   final MediaType mediaType;
   final String title;
@@ -972,7 +969,7 @@ class _ScheduleBody extends ConsumerWidget {
   final CalendarTab tab;
 
   /// True while the week is being fetched: counts and cards render as
-  /// Skeletonizer bones instead of stale or empty data.
+  /// shimmer bones instead of stale or empty data.
   final bool loading;
   final String? selectedDayKey;
   final ValueChanged<String> onSelectDay;
@@ -1212,10 +1209,16 @@ class _SelectedDayHeader extends ConsumerWidget {
           const SizedBox(width: Tokens.space8),
           Text('—', style: TextStyle(color: scheme.onSurfaceVariant)),
           const SizedBox(width: Tokens.space8),
-          Skeletonizer(
-            enabled: loading,
-            effect: skeletonEffect(context),
-            child: Container(
+          if (loading)
+            const SkeletonShimmer(
+              child: SkeletonBone(
+                width: 108,
+                height: 28,
+                radius: Tokens.radiusPill,
+              ),
+            )
+          else
+            Container(
               padding: const EdgeInsets.symmetric(
                 horizontal: Tokens.space12,
                 vertical: Tokens.space4,
@@ -1228,14 +1231,13 @@ class _SelectedDayHeader extends ConsumerWidget {
                 borderRadius: BorderRadius.circular(Tokens.radiusPill),
               ),
               child: Text(
-                loading ? '00 episodes' : countLabel,
+                countLabel,
                 style: theme.textTheme.labelLarge?.copyWith(
                   color: scheme.primary,
                   fontWeight: FontWeight.w700,
                 ),
               ),
             ),
-          ),
         ],
       ],
     );
@@ -1546,7 +1548,7 @@ class _TileColors {
 
 String _releaseWord(int count) => count == 1 ? 'release' : 'releases';
 
-/// Count pill that turns into a Skeletonizer bone while the week loads.
+/// Count pill that turns into a shimmer bone while the week loads.
 class _CountPill extends StatelessWidget {
   const _CountPill({
     required this.text,
@@ -1565,30 +1567,35 @@ class _CountPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Skeletonizer(
-      enabled: loading,
-      effect: skeletonEffect(context),
-      child: Container(
-        constraints: BoxConstraints(minWidth: minWidth),
-        padding: const EdgeInsets.symmetric(
-          horizontal: Tokens.space8,
-          vertical: Tokens.space2,
+    if (loading) {
+      return SkeletonShimmer(
+        child: SkeletonBone(
+          width: minWidth > 32 ? minWidth : 32,
+          height: 20,
+          radius: Tokens.radiusPill,
         ),
-        decoration: BoxDecoration(
-          color: colors.pillBackground,
-          borderRadius: BorderRadius.circular(Tokens.radiusPill),
-        ),
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Text(
-            text,
-            maxLines: 1,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: colors.pillText,
-              fontSize: fontSize,
-              fontWeight: FontWeight.w800,
-            ),
+      );
+    }
+    return Container(
+      constraints: BoxConstraints(minWidth: minWidth),
+      padding: const EdgeInsets.symmetric(
+        horizontal: Tokens.space8,
+        vertical: Tokens.space2,
+      ),
+      decoration: BoxDecoration(
+        color: colors.pillBackground,
+        borderRadius: BorderRadius.circular(Tokens.radiusPill),
+      ),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          text,
+          maxLines: 1,
+          textAlign: TextAlign.center,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: colors.pillText,
+            fontSize: fontSize,
+            fontWeight: FontWeight.w800,
           ),
         ),
       ),
@@ -1908,8 +1915,8 @@ int _cardColumns(double width) {
 }
 
 /// Responsive grid of release cards. With [skeleton] set it renders two rows
-/// of placeholder cards inside a Skeletonizer, so the loading state has the
-/// exact proportions of the real cards.
+/// of [_ReleaseCardSkeleton]s, so the loading state has the exact proportions
+/// of the real cards.
 class _CardGrid extends StatelessWidget {
   const _CardGrid({required this.skeleton, required this.releases});
 
@@ -1941,18 +1948,12 @@ class _CardGrid extends StatelessWidget {
           ),
           itemCount: itemCount,
           itemBuilder: (context, index) => RepaintBoundary(
-            child: _ReleaseCard(
-              data: skeleton ? _ReleaseData.placeholder : releases[index],
-              placeholder: skeleton,
-            ),
+            child: skeleton
+                ? const _ReleaseCardSkeleton()
+                : _ReleaseCard(data: releases[index]),
           ),
         );
-        if (!skeleton) return grid;
-        return Skeletonizer(
-          enabled: true,
-          effect: skeletonEffect(context),
-          child: grid,
-        );
+        return grid;
       },
     );
   }
@@ -2017,22 +2018,17 @@ class _PlatformChip extends StatelessWidget {
 /// Release card: poster with format badge, title + bell, episode, then the
 /// time, score and streaming platform. Shared by anime and manga.
 class _ReleaseCard extends ConsumerWidget {
-  const _ReleaseCard({required this.data, required this.placeholder});
+  const _ReleaseCard({required this.data});
 
   final _ReleaseData data;
-
-  /// Skeleton mode: not tappable, no reminder lookup.
-  final bool placeholder;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final reminded = placeholder
-        ? false
-        : ref.watch(
-            calendarRemindersProvider.select((s) => s.contains(data.mediaId)),
-          );
+    final reminded = ref.watch(
+      calendarRemindersProvider.select((s) => s.contains(data.mediaId)),
+    );
     final hasScore = data.score != null && data.score! > 0;
 
     return Material(
@@ -2043,10 +2039,8 @@ class _ReleaseCard extends ConsumerWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: placeholder
-            ? null
-            : () =>
-                  context.go(Routes.mediaDetail(data.mediaType, data.mediaId)),
+        onTap: () =>
+            context.go(Routes.mediaDetail(data.mediaType, data.mediaId)),
         child: Padding(
           padding: const EdgeInsets.all(Tokens.space12 + 2),
           child: Row(
@@ -2082,11 +2076,9 @@ class _ReleaseCard extends ConsumerWidget {
                             color: reminded
                                 ? scheme.primary
                                 : scheme.onSurfaceVariant,
-                            onPressed: placeholder
-                                ? null
-                                : () => ref
-                                      .read(calendarRemindersProvider.notifier)
-                                      .toggle(data.mediaId),
+                            onPressed: () => ref
+                                .read(calendarRemindersProvider.notifier)
+                                .toggle(data.mediaId),
                             icon: Icon(
                               reminded
                                   ? Icons.notifications_active_rounded
@@ -2188,9 +2180,62 @@ class _ReleaseCard extends ConsumerWidget {
   }
 }
 
+/// Loading twin of [_ReleaseCard]: the same shell, padding, poster ratio and
+/// text rows, with shimmering bones in place of the content. Only the bones
+/// are inside the shimmer, so the card surface itself stays solid.
+class _ReleaseCardSkeleton extends StatelessWidget {
+  const _ReleaseCardSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surfaceContainerLow,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Tokens.radiusLg),
+        side: BorderSide(color: scheme.outlineVariant),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(Tokens.space12 + 2),
+        child: SkeletonShimmer(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const AspectRatio(
+                aspectRatio: 0.7,
+                child: SkeletonBone(radius: Tokens.radiusMd),
+              ),
+              const SizedBox(width: Tokens.space12 + 2),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SkeletonLine(height: 16),
+                    const SizedBox(height: Tokens.space8),
+                    const SkeletonLine(fraction: 0.7, height: 16),
+                    const SizedBox(height: Tokens.space8),
+                    const SkeletonLine(fraction: 0.4, height: 13),
+                    const Spacer(),
+                    const SkeletonLine(fraction: 0.55, height: 14),
+                    const SizedBox(height: Tokens.space12),
+                    SkeletonBone(
+                      width: 84,
+                      height: 20,
+                      radius: Tokens.radiusSm,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Poster with the format badge ("TV", "ONA", "SHORT") on its corner.
-///
-/// `Skeleton.leaf` makes the whole poster one bone while loading.
 class _Poster extends StatelessWidget {
   const _Poster({required this.data});
 
@@ -2207,8 +2252,7 @@ class _Poster extends StatelessWidget {
     );
     final cover = data.coverUrl;
 
-    return Skeleton.leaf(
-      child: AspectRatio(
+    return AspectRatio(
         aspectRatio: 0.7,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(Tokens.radiusMd),
@@ -2252,7 +2296,6 @@ class _Poster extends StatelessWidget {
             ],
           ),
         ),
-      ),
     );
   }
 }

@@ -275,11 +275,33 @@ class _HoverLiftState extends State<HoverLift> {
 
 extension SmoothScrollExtension on ScrollController {
   /// Animated, eased scroll-to — use for "back to top" / anchor jumps.
-  Future<void> smoothTo(double offset) {
-    return animateTo(
-      offset,
-      duration: const Duration(milliseconds: 650),
-      curve: Curves.easeOutCubic,
+  ///
+  /// Tuned for long lists:
+  ///  * the duration scales with the distance (a fixed time made short hops
+  ///    feel sluggish and long ones feel like a blur),
+  ///  * a long trip first jumps to within ~1.5 screens of the target and
+  ///    glides the rest, so the list never has to build and paint hundreds of
+  ///    cards that fly past in a few frames (that was the stutter),
+  ///  * ease-in-out starts and lands softly instead of snapping on arrival.
+  Future<void> smoothTo(double offset) async {
+    if (!hasClients) return;
+    final pos = position;
+    final target = offset.clamp(pos.minScrollExtent, pos.maxScrollExtent);
+    final viewport = pos.viewportDimension;
+    final glide = viewport * 1.5;
+
+    if ((pos.pixels - target).abs() > glide) {
+      final from = pos.pixels > target ? target + glide : target - glide;
+      jumpTo(from);
+    }
+
+    final distance = (pos.pixels - target).abs();
+    if (distance < 1) return;
+    final ms = (380 + 260 * (distance / glide).clamp(0.0, 1.0)).round();
+    await animateTo(
+      target,
+      duration: Duration(milliseconds: ms),
+      curve: Curves.easeInOutCubic,
     );
   }
 }
