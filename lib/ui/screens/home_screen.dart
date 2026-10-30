@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_carousel_widget/flutter_carousel_widget.dart';
-import 'package:skeletonizer/skeletonizer.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -409,15 +408,10 @@ class _CarouselLoading extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-      child: Skeletonizer(
-        enabled: true,
-        effect: skeletonEffect(context),
-        child: Container(
+      child: SkeletonShimmer(
+        child: SkeletonBone(
           height: _SpotlightCarousel.height,
-          decoration: BoxDecoration(
-            color: Colors.black12,
-            borderRadius: BorderRadius.circular(Tokens.radiusXl),
-          ),
+          radius: Tokens.radiusXl,
         ),
       ),
     );
@@ -834,7 +828,11 @@ class _AiringTodaySection extends ConsumerWidget {
             actionLabel: 'View all',
             actionPath: '/calendar?tab=anime',
           ),
-          LoadingRail(height: _airingStripHeight, itemWidth: _airingCardWidth),
+          LoadingAiringRail(
+            height: _airingStripHeight,
+            itemWidth: _airingCardWidth,
+            coverHeight: _airingCoverHeight,
+          ),
         ],
       ),
       error: (e, s) => const SizedBox.shrink(),
@@ -872,6 +870,9 @@ class _AiringTodaySection extends ConsumerWidget {
 const double _airingCardWidth = 124;
 const double _airingStripHeight = 212;
 
+/// Cover height inside [_AiringTodayCard]; the loading skeleton reuses it.
+const double _airingCoverHeight = 150;
+
 /// Compact episode card for the "Releasing today" strip.
 class _AiringTodayCard extends StatelessWidget {
   const _AiringTodayCard({required this.item});
@@ -898,18 +899,18 @@ class _AiringTodayCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(Tokens.radiusLg),
                 child: item.coverUrl == null || item.coverUrl!.isEmpty
                     ? Container(
-                        height: 150,
+                        height: _airingCoverHeight,
                         color: theme.disabledColor.withValues(alpha: 0.12),
                       )
                     : Image.network(
                         item.coverUrl!,
-                        height: 150,
+                        height: _airingCoverHeight,
                         width: _airingCardWidth,
                         fit: BoxFit.cover,
                         gaplessPlayback: true,
                         filterQuality: FilterQuality.low,
                         errorBuilder: (context, error, stack) => Container(
-                          height: 150,
+                          height: _airingCoverHeight,
                           color: theme.disabledColor.withValues(alpha: 0.12),
                         ),
                       ),

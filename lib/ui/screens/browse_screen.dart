@@ -3,21 +3,20 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:skeletonizer/skeletonizer.dart';
 
 import '../../core/theme/app_motion.dart';
 import '../../core/theme/app_scroll.dart';
 import '../../core/theme/design_tokens.dart';
 import '../../data/models/media.dart';
-import '../../data/repositories/media_repository.dart';
 import '../../state/browse_controller.dart';
 import '../../state/load_state.dart';
 import '../components/app_footer.dart';
 import '../components/browse_card.dart';
-import '../components/browse_filters.dart';
+import '../components/browse_filters.dart' show browseSortLabel;
 import '../components/pagination_bar.dart';
 import '../components/sliver_headers.dart';
-import '../components/state_views.dart' show skeletonEffect;
+import '../components/state_views.dart'
+    show SkeletonBone, SkeletonLine, SkeletonShimmer;
 import '../router/app_router.dart';
 
 /// Browse screen shared by Anime and Manga (different [type]).
@@ -25,7 +24,7 @@ import '../router/app_router.dart';
 /// Layout, top to bottom:
 ///  1. a header card (icon, title, result count and current page);
 ///  2. one pinned bar: lineup pills (Trending, Airing, Popular, ...) with
-///     the Sort menu and the Filters button on the right;
+///     the Sort menu on the right;
 ///  3. the poster grid for the current page;
 ///  4. a page-by-page pager (previous, numbered pages, next).
 ///
@@ -48,9 +47,8 @@ const double _maxWidth = 1280;
 
 /// Height of the pinned bar's main row (44 px controls + breathing room).
 const double _barHeight = 64;
-const double _activeRowHeight = 44;
 
-/// Size of the round-cornered Sort / Filters buttons and pager arrows.
+/// Size of the round-cornered Sort button and pager arrows.
 const double _toolSize = 44;
 
 /// Posters never get wider than this; the column count follows.
@@ -93,14 +91,6 @@ String _formatCount(int n) {
     buf.write(s[i]);
   }
   return buf.toString();
-}
-
-/// Filters the reader added themselves. A lineup's own status (e.g. "Airing"
-/// = Releasing) is part of the lineup pill, so it is not counted again.
-int _visibleFilterCount(BrowseState s) {
-  final lineupStatus = s.activePreset?.status;
-  final implied = lineupStatus != null && lineupStatus == s.query.status;
-  return s.query.activeFilterCount - (implied ? 1 : 0);
 }
 
 /// Poster grid metrics for a content [width]: as many columns as fit without
@@ -183,11 +173,6 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final showActive = ref.watch(
-      browseControllerProvider(widget.type)
-          .select((s) => _visibleFilterCount(s) > 0),
-    );
-
     ref.listen<LoadStatus>(
       browseControllerProvider(widget.type).select((s) => s.status),
       (previous, next) {
@@ -205,7 +190,6 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
       builder: (context, constraints) {
         final width = math.min(constraints.maxWidth, _maxWidth);
         final gutter = width >= 600 ? Tokens.space24 : Tokens.space16;
-        final barHeight = _barHeight + (showActive ? _activeRowHeight : 0);
         final delegate = _gridDelegate(context, width: width, gutter: gutter);
 
         return Align(
@@ -223,12 +207,11 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
                     SliverPersistentHeader(
                       pinned: true,
                       delegate: _BarDelegate(
-                        height: barHeight,
+                        height: _barHeight,
                         child: _ControlsBar(
                           type: widget.type,
                           gutter: gutter,
                           wide: width >= 720,
-                          showActive: showActive,
                         ),
                       ),
                     ),
@@ -407,7 +390,7 @@ class _Header extends ConsumerWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Pinned controls: lineup pills, sort, filters, active filters
+// Pinned controls: lineup pills and sort
 // ---------------------------------------------------------------------------
 
 /// Pinned header that draws a hairline under itself once content scrolls
@@ -459,42 +442,29 @@ class _ControlsBar extends StatelessWidget {
     required this.type,
     required this.gutter,
     required this.wide,
-    required this.showActive,
   });
 
   final MediaType type;
   final double gutter;
 
-  /// Enough room for text labels next to the Sort / Filters icons.
+  /// Enough room for a text label next to the Sort icon.
   final bool wide;
-  final bool showActive;
 
   @override
   Widget build(BuildContext context) {
     final pad = EdgeInsets.symmetric(horizontal: gutter);
-    return Column(
-      children: [
-        SizedBox(
-          height: _barHeight,
-          child: Padding(
-            padding: pad,
-            child: Row(
-              children: [
-                Expanded(child: _LineupPills(type: type)),
-                const SizedBox(width: Tokens.space8),
-                _SortMenu(type: type, showLabel: wide),
-                const SizedBox(width: Tokens.space8),
-                _FilterButton(type: type, showLabel: wide),
-              ],
-            ),
-          ),
+    return SizedBox(
+      height: _barHeight,
+      child: Padding(
+        padding: pad,
+        child: Row(
+          children: [
+            Expanded(child: _LineupPills(type: type)),
+            const SizedBox(width: Tokens.space8),
+            _SortMenu(type: type, showLabel: wide),
+          ],
         ),
-        if (showActive)
-          SizedBox(
-            height: _activeRowHeight,
-            child: Padding(padding: pad, child: _ActiveFilters(type: type)),
-          ),
-      ],
+      ),
     );
   }
 }
@@ -612,30 +582,24 @@ class _LineupPill extends StatelessWidget {
   }
 }
 
-/// Outlined 44 px button shared by Sort and Filters: a 22 px icon, plus a
-/// text label when there is room. [active] tints it with the accent.
+/// Outlined 44 px button used by Sort: a 22 px icon, plus a
+/// text label when there is room. Taps are handled by the Sort popup menu
+/// that wraps it.
 class _ToolButton extends StatelessWidget {
   const _ToolButton({
     required this.icon,
     this.label,
-    this.onTap,
-    this.active = false,
   });
 
   final IconData icon;
   final String? label;
-
-  /// Null when the button is the child of something that handles taps
-  /// itself (the Sort popup menu).
-  final VoidCallback? onTap;
-  final bool active;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final radius = BorderRadius.circular(Tokens.radiusLg - 2);
-    final color = active ? scheme.primary : scheme.onSurface;
+    final color = scheme.onSurface;
     final content = Container(
       height: _toolSize,
       constraints: const BoxConstraints(minWidth: _toolSize),
@@ -643,10 +607,7 @@ class _ToolButton extends StatelessWidget {
       alignment: Alignment.center,
       decoration: BoxDecoration(
         borderRadius: radius,
-        color: active ? scheme.primary.withValues(alpha: 0.10) : null,
-        border: Border.all(
-          color: active ? scheme.primary : scheme.outlineVariant,
-        ),
+        border: Border.all(color: scheme.outlineVariant),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -666,8 +627,7 @@ class _ToolButton extends StatelessWidget {
         ],
       ),
     );
-    if (onTap == null) return content;
-    return InkWell(borderRadius: radius, onTap: onTap, child: content);
+    return content;
   }
 }
 
@@ -702,229 +662,6 @@ class _SortMenu extends ConsumerWidget {
       child: _ToolButton(
         icon: Icons.swap_vert_rounded,
         label: showLabel ? browseSortLabel(sort) : null,
-      ),
-    );
-  }
-}
-
-class _FilterButton extends ConsumerWidget {
-  const _FilterButton({required this.type, required this.showLabel});
-
-  final MediaType type;
-  final bool showLabel;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final count = ref.watch(
-      browseControllerProvider(type).select(_visibleFilterCount),
-    );
-    return Badge(
-      isLabelVisible: count > 0,
-      label: Text('$count'),
-      child: Tooltip(
-        message: 'Filters',
-        child: _ToolButton(
-          icon: Icons.tune_rounded,
-          label: showLabel ? 'Filters' : null,
-          active: count > 0,
-          onTap: () => showModalBottomSheet<void>(
-            context: context,
-            isScrollControlled: true,
-            useSafeArea: true,
-            showDragHandle: true,
-            constraints: const BoxConstraints(maxWidth: 560),
-            builder: (_) => _FilterSheet(type: type),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Removable chips summarising the filters the reader added.
-class _ActiveFilters extends ConsumerWidget {
-  const _ActiveFilters({required this.type});
-
-  final MediaType type;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final data = ref.watch(
-      browseControllerProvider(type).select(
-        (s) => (query: s.query, lineupStatus: s.activePreset?.status),
-      ),
-    );
-    final query = data.query;
-    final controller = ref.read(browseControllerProvider(type).notifier);
-
-    Widget chip(String label, VoidCallback onDeleted) => InputChip(
-          label: Text(label),
-          onDeleted: onDeleted,
-          visualDensity: VisualDensity.compact,
-        );
-    void apply(BrowseQuery q) => controller.applyQuery(q);
-
-    final chips = <Widget>[
-      if (query.genre != null && query.genre!.isNotEmpty)
-        chip(query.genre!, () => apply(editBrowseQuery(query, genre: null))),
-      if (query.format != null)
-        chip(
-          query.format!.label,
-          () => apply(editBrowseQuery(query, format: null)),
-        ),
-      // The lineup's own status is already shown by the selected pill.
-      if (query.status != null && query.status != data.lineupStatus)
-        chip(
-          query.status!.label,
-          () => apply(editBrowseQuery(query, status: null)),
-        ),
-      if (query.season != null)
-        chip(
-          query.season!.label,
-          () => apply(editBrowseQuery(query, season: null)),
-        ),
-      if (query.seasonYear != null)
-        chip(
-          '${query.seasonYear}',
-          () => apply(editBrowseQuery(query, seasonYear: null)),
-        ),
-      if (query.minScore != null)
-        chip(
-          '≥ ${(query.minScore! / 10).toStringAsFixed(1)}',
-          () => apply(editBrowseQuery(query, minScore: null)),
-        ),
-      if (query.countryOfOrigin != null)
-        chip(
-          kCountries[query.countryOfOrigin] ?? query.countryOfOrigin!,
-          () => apply(editBrowseQuery(query, country: null)),
-        ),
-      if (query.source != null)
-        chip(
-          query.source!.label,
-          () => apply(editBrowseQuery(query, source: null)),
-        ),
-      if (query.isAdult)
-        chip('Adult', () => apply(editBrowseQuery(query, isAdult: false))),
-    ];
-    if (chips.isEmpty) return const SizedBox.shrink();
-
-    return ListView(
-      scrollDirection: Axis.horizontal,
-      children: [
-        for (final c in chips)
-          Padding(
-            padding: const EdgeInsets.only(right: Tokens.space8),
-            child: Center(child: c),
-          ),
-        Center(
-          child: TextButton(
-            onPressed: controller.clearFilters,
-            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-            child: const Text('Clear all'),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Filters sheet
-// ---------------------------------------------------------------------------
-
-/// Filter sheet. Edits a draft; "Show results" applies it with a
-/// single reload instead of one request per tapped chip.
-class _FilterSheet extends ConsumerStatefulWidget {
-  const _FilterSheet({required this.type});
-
-  final MediaType type;
-
-  @override
-  ConsumerState<_FilterSheet> createState() => _FilterSheetState();
-}
-
-class _FilterSheetState extends ConsumerState<_FilterSheet> {
-  late BrowseQuery _draft;
-
-  @override
-  void initState() {
-    super.initState();
-    _draft = ref.read(browseControllerProvider(widget.type)).query;
-  }
-
-  void _apply() {
-    ref.read(browseControllerProvider(widget.type).notifier).applyQuery(_draft);
-    Navigator.of(context).pop();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final count = _draft.activeFilterCount;
-
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.88,
-      minChildSize: 0.5,
-      maxChildSize: 0.95,
-      builder: (context, scrollController) => Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              Tokens.space20,
-              0,
-              Tokens.space12,
-              Tokens.space8,
-            ),
-            child: Row(
-              children: [
-                Text(
-                  count > 0 ? 'Filters ($count)' : 'Filters',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const Spacer(),
-                TextButton(
-                  onPressed: count > 0
-                      ? () => setState(
-                            () => _draft = resetBrowseFilters(_draft),
-                          )
-                      : null,
-                  child: const Text('Reset'),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: ListView(
-              controller: scrollController,
-              padding: const EdgeInsets.all(Tokens.space20),
-              children: [
-                BrowseFilterForm(
-                  query: _draft,
-                  onChanged: (q) => setState(() => _draft = q),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.all(Tokens.space16),
-              child: SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: FilledButton(
-                  onPressed: _apply,
-                  child: const Text('Show results'),
-                ),
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -971,10 +708,10 @@ class _Results extends ConsumerWidget {
       return SliverEmpty(
         title: 'No results',
         message:
-            'No ${type.label.toLowerCase()} match these filters. '
-            'Try widening them.',
+            'No ${type.label.toLowerCase()} found for this lineup. '
+            'Try another one.',
         icon: Icons.search_off_rounded,
-        actionLabel: 'Clear filters',
+        actionLabel: 'Show all',
         onAction: controller.clearFilters,
       );
     }
@@ -1092,8 +829,8 @@ class _PagerSection extends ConsumerWidget {
 // ---------------------------------------------------------------------------
 
 /// One page of placeholder cards, shown while a page loads. The cards are
-/// ordinary widgets filled with dummy text; one [Skeletonizer] turns every
-/// text run and decorated box into a shimmering bone.
+/// ordinary widgets filled with dummy text; one [SkeletonShimmer] sweeps
+/// every bone in the grid.
 class _SkeletonGrid extends StatelessWidget {
   const _SkeletonGrid({required this.delegate});
 
@@ -1104,9 +841,7 @@ class _SkeletonGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SliverToBoxAdapter(
-      child: Skeletonizer(
-        enabled: true,
-        effect: skeletonEffect(context),
+      child: SkeletonShimmer(
         child: GridView.builder(
           padding: EdgeInsets.zero,
           shrinkWrap: true,
@@ -1128,44 +863,20 @@ class _CardSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: Colors.black12,
-              borderRadius: BorderRadius.circular(Tokens.radiusLg),
-            ),
-          ),
-        ),
+        const Expanded(child: SkeletonBone(radius: Tokens.radiusLg)),
         SizedBox(
           height: browseCardTextHeight(context),
           child: Padding(
             padding: const EdgeInsets.only(top: 10),
-            child: Column(
+            child: const Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Placeholder series title that wraps',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
-                    height: 1.25,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  'TV · 2024',
-                  maxLines: 1,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    fontSize: 11.5,
-                    height: 1.3,
-                  ),
-                ),
+                SkeletonLine(height: 12),
+                SizedBox(height: 6),
+                SkeletonLine(fraction: 0.5, height: 10),
               ],
             ),
           ),

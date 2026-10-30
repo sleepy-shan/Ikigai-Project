@@ -74,7 +74,11 @@ class AniListHttpClient extends http.BaseClient {
       final bytes = await response.stream.toBytes();
 
       if (status == 429) {
-        final wait = _retryAfter(response) ?? _backoffDelay(attempt);
+        // On web, CORS usually hides `Retry-After`, so the fallback must be
+        // long enough to outlast AniList's block (a 0.5-1s backoff just hits
+        // the limit again and burns the retries): 5s, then 10s.
+        final wait =
+            _retryAfter(response) ?? Duration(seconds: 5 * (attempt + 1));
         _blockedUntil = DateTime.now().add(wait); // pause everyone
         if (wait > _maxAutoWait || attempt >= maxRetries) {
           throw AppException(
