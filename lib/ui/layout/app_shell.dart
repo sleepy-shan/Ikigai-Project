@@ -30,7 +30,12 @@ class _Destination {
 /// of the desktop sidebar.
 const List<_Destination> _mainDestinations = [
   _Destination('Home', Icons.home_outlined, Icons.home_rounded, Routes.home),
-  _Destination('Anime', Icons.movie_outlined, Icons.movie_rounded, Routes.anime),
+  _Destination(
+    'Anime',
+    Icons.movie_outlined,
+    Icons.movie_rounded,
+    Routes.anime,
+  ),
   _Destination(
     'Manga',
     Icons.menu_book_outlined,
@@ -132,8 +137,7 @@ class AppShell extends ConsumerWidget {
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.slash): goSearch,
-        const SingleActivator(LogicalKeyboardKey.keyK, control: true):
-            goSearch,
+        const SingleActivator(LogicalKeyboardKey.keyK, control: true): goSearch,
         const SingleActivator(LogicalKeyboardKey.keyK, meta: true): goSearch,
       },
       child: Scaffold(
@@ -213,59 +217,56 @@ class _AuroraBackground extends StatelessWidget {
       child: Stack(
         children: [
           ColoredBox(color: Theme.of(context).scaffoldBackgroundColor),
-        Positioned(
-          top: -140,
-          left: -80,
-          child: Container(
-            width: 460,
-            height: 340,
-            decoration: BoxDecoration(
-              gradient: RadialGradient(
-                colors: [
-                  // Tints with the selected accent via the color scheme.
-                  scheme.primary.withValues(
-                    alpha: isDark ? 0.28 : 0.14,
-                  ),
-                  Colors.transparent,
-                ],
+          Positioned(
+            top: -140,
+            left: -80,
+            child: Container(
+              width: 460,
+              height: 340,
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  colors: [
+                    // Tints with the selected accent via the color scheme.
+                    scheme.primary.withValues(alpha: isDark ? 0.28 : 0.14),
+                    Colors.transparent,
+                  ],
+                ),
               ),
             ),
           ),
-        ),
-        Positioned(
-          top: -100,
-          right: -60,
-          child: Container(
-            width: 420,
-            height: 300,
-            decoration: BoxDecoration(
-              gradient: RadialGradient(
-                colors: [
-                  scheme.secondary.withValues(alpha: isDark ? 0.20 : 0.12),
-                  Colors.transparent,
-                ],
+          Positioned(
+            top: -100,
+            right: -60,
+            child: Container(
+              width: 420,
+              height: 300,
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  colors: [
+                    scheme.secondary.withValues(alpha: isDark ? 0.20 : 0.12),
+                    Colors.transparent,
+                  ],
+                ),
               ),
             ),
           ),
-        ),
-        Positioned(
-          bottom: -160,
-          left: MediaQuery.sizeOf(context).width * 0.25,
-          child: Container(
-            width: 560,
-            height: 320,
-            decoration: BoxDecoration(
-              gradient: RadialGradient(
-                colors: [
-                  Theme.of(context).colorScheme.tertiary.withValues(
-                    alpha: isDark ? 0.14 : 0.08,
-                  ),
-                  Colors.transparent,
-                ],
+          Positioned(
+            bottom: -160,
+            left: MediaQuery.sizeOf(context).width * 0.25,
+            child: Container(
+              width: 560,
+              height: 320,
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  colors: [
+                    Theme.of(context).colorScheme.tertiary
+                        .withValues(alpha: isDark ? 0.14 : 0.08),
+                    Colors.transparent,
+                  ],
+                ),
               ),
             ),
           ),
-        ),
         ],
       ),
     );
@@ -287,7 +288,7 @@ class _PageFadeState extends State<_PageFade>
   late final AnimationController _controller = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 260),
-  )..forward();
+  );
   late final Animation<double> _fade = CurvedAnimation(
     parent: _controller,
     curve: Tokens.curveSmooth,
@@ -298,6 +299,16 @@ class _PageFadeState extends State<_PageFade>
   ).animate(_fade);
 
   @override
+  void initState() {
+    super.initState();
+    // Start after the new page's heavy first build/layout frame, so that
+    // frame doesn't eat the beginning of the animation (visible as a hitch).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _controller.forward();
+    });
+  }
+
+  @override
   void dispose() {
     _controller.dispose();
     super.dispose();
@@ -305,9 +316,14 @@ class _PageFadeState extends State<_PageFade>
 
   @override
   Widget build(BuildContext context) {
+    // The RepaintBoundary caches the page as its own layer so the fade/slide
+    // composites a texture instead of repainting the page every frame.
     return FadeTransition(
       opacity: _fade,
-      child: SlideTransition(position: _slide, child: widget.child),
+      child: SlideTransition(
+        position: _slide,
+        child: RepaintBoundary(child: widget.child),
+      ),
     );
   }
 }
@@ -450,7 +466,7 @@ const double _sidebarExpandedWidth = 232;
 const double _sidebarCollapsedWidth = 72;
 
 /// How long the sidebar takes to open or close.
-const Duration _sidebarDuration = Duration(milliseconds: 300);
+const Duration _sidebarDuration = Duration(milliseconds: 600);
 
 /// Width of the label slot inside a sidebar row. Labels are always laid out
 /// at this fixed width and merely clipped by the shrinking sidebar, so text is
@@ -460,7 +476,8 @@ const double _sidebarLabelWidth = 150;
 /// Desktop sidebar: Home, Anime, Manga, Calendar, Watchlist, History,
 /// Settings. Collapses to icons; the choice is remembered.
 ///
-/// One [AnimationController] drives everything (ease-in-out): the width and
+/// One [AnimationController] drives everything (ease-in open, ease-out
+/// close, 800ms): the width and
 /// the label fade. The rows are built once and only the width wrapper and the
 /// label opacity update per frame.
 class _Sidebar extends ConsumerStatefulWidget {
@@ -487,7 +504,13 @@ class _SidebarState extends ConsumerState<_Sidebar>
       duration: _sidebarDuration,
       value: collapsed ? 0 : 1,
     );
-    _width = CurvedAnimation(parent: _controller, curve: Curves.easeInOut);
+    // Ease in while expanding, ease out while collapsing (flipped so the
+    // collapse decelerates visually, rather than the controller's reverse).
+    _width = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeIn,
+      reverseCurve: Curves.easeOut.flipped,
+    );
     // Labels fade in over the second half of opening and out over the first
     // half of closing, so text never sits cramped in a half-open sidebar.
     _labelOpacity = CurvedAnimation(
