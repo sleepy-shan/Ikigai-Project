@@ -54,6 +54,7 @@ String browseSortLabel(MediaSort sort) => switch (sort) {
       MediaSort.startDate => 'Newest',
       MediaSort.updated => 'Updated',
       MediaSort.titleRomaji => 'A – Z',
+      MediaSort.searchMatch => 'Best match',
     };
 
 /// Every browse filter as grouped chips.

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/utils/app_exception.dart';
 import '../data/anilist/anilist_client.dart';
 import '../data/models/account.dart';
 import '../data/models/airing_schedule.dart';
@@ -9,6 +10,10 @@ import '../data/models/media.dart';
 import '../data/models/people.dart';
 import '../data/repositories/auth_repository.dart';
 import '../data/repositories/media_repository.dart';
+import 'anime_providers.dart';
+import 'gql_catalog.dart';
+import 'graphql_providers.dart' show noProviderRetry;
+import 'swr.dart';
 import 'providers.dart';
 
 /// Shared AniList HTTP client and repository.
@@ -25,7 +30,10 @@ final aniListClientProvider = Provider<AniListClient>((ref) {
 final mediaRepositoryProvider = Provider<MediaRepository>((ref) {
   // `read` would also work; `watch` keeps rails in sync if the client
   // is ever overridden in tests.
-  return MediaRepository(ref.watch(aniListClientProvider));
+  return MediaRepository(
+    ref.watch(aniListClientProvider),
+    transport: ref.watch(gqlCatalogProvider).raw,
+  );
 });
 
 /// Home page rails.
@@ -46,54 +54,54 @@ enum MediaRail {
 }
 
 final mediaRailProvider =
-    FutureProvider.family.autoDispose<MediaPage, (MediaRail, MediaType)>((
-      ref,
-      key,
-    ) async {
-  final (rail, type) = key;
-  final repo = ref.watch(mediaRepositoryProvider);
-  BrowseQuery query({MediaSort sort = MediaSort.trending, MediaStatus? status}) {
-    return BrowseQuery(type: type, sort: sort, status: status, perPage: 12);
-  }
+    StreamProvider.family.autoDispose<MediaPage, (MediaRail, MediaType)>(
+      (ref, key) {
+        final (rail, type) = key;
+        return animePageStream(ref, _railArgs(rail, type)).map(
+          (r) => MediaPage(
+            items: [for (final m in r.data.media) m.toMedia()],
+            page: r.data.pageInfo.currentPage,
+            hasNextPage: r.data.pageInfo.hasNextPage,
+            total: r.data.pageInfo.total,
+          ),
+        );
+      },
+      retry: noProviderRetry,
+    );
+
+/// Same rail definitions the repository-based version used.
+AnimePageArgs _railArgs(MediaRail rail, MediaType type) {
+  AnimePageArgs q({MediaSort sort = MediaSort.trending, MediaStatus? status}) =>
+      AnimePageArgs(type: type, sort: sort, status: status, perPage: 12);
 
   switch (rail) {
     case MediaRail.trendingAnime:
     case MediaRail.trendingManga:
-      return repo.trending(type: type, perPage: 12);
+      return q();
     case MediaRail.popularThisSeason:
-      if (type == MediaType.manga) {
-        // Seasons are anime-only on AniList; manga falls back to popularity.
-        return repo.browse(query(sort: MediaSort.popularity));
-      }
+      if (type == MediaType.manga) return q(sort: MediaSort.popularity);
       final now = DateTime.now();
-      return repo.browse(
-        BrowseQuery(
-          type: type,
-          sort: MediaSort.popularity,
-          // AniList needs a season together with seasonYear for anime.
-          season: currentSeason(now.month),
-          seasonYear: now.year,
-          perPage: 12,
-        ),
+      return AnimePageArgs(
+        type: type,
+        sort: MediaSort.popularity,
+        season: currentSeason(now.month),
+        seasonYear: now.year,
+        perPage: 12,
       );
     case MediaRail.airingNow:
-      return repo.browse(query(status: MediaStatus.releasing));
+      return q(status: MediaStatus.releasing);
     case MediaRail.allTimePopular:
-      return repo.browse(query(sort: MediaSort.popularity));
+      return q(sort: MediaSort.popularity);
     case MediaRail.upcoming:
-      return repo.browse(
-        query(sort: MediaSort.popularity, status: MediaStatus.notYetReleased),
-      );
+      return q(sort: MediaSort.popularity, status: MediaStatus.notYetReleased);
     case MediaRail.topRated:
-      return repo.browse(query(sort: MediaSort.score));
+      return q(sort: MediaSort.score);
     case MediaRail.topCompleted:
-      return repo.browse(
-        query(sort: MediaSort.score, status: MediaStatus.finished),
-      );
+      return q(sort: MediaSort.score, status: MediaStatus.finished);
     case MediaRail.newChapters:
-      return repo.browse(query(sort: MediaSort.updated));
+      return q(sort: MediaSort.updated);
   }
-});
+}
 
 /// Every episode airing today (midnight to midnight, local time).
 ///
@@ -102,12 +110,12 @@ final mediaRailProvider =
 /// repository TTL cache keeps revisits cheap.
 final airingTodayProvider =
     FutureProvider.autoDispose<List<AiringScheduleItem>>((ref) async {
-  final repo = ref.watch(mediaRepositoryProvider);
+  final catalog = ref.watch(gqlCatalogProvider);
   final now = DateTime.now();
   final start = DateTime(now.year, now.month, now.day);
   // Calendar arithmetic, not `Duration(days: 1)` (25h/23h days at DST changes).
   final end = DateTime(now.year, now.month, now.day + 1);
-  return repo.airingScheduleAll(
+  return catalog.airingScheduleAll(
     from: start.millisecondsSinceEpoch ~/ 1000,
     to: end.millisecondsSinceEpoch ~/ 1000,
   );
@@ -121,14 +129,29 @@ MediaSeason currentSeason(int month) {
   return MediaSeason.fall;
 }
 
-/// Media detail for a title id.
-final mediaDetailProvider = FutureProvider.family.autoDispose<Media, int>((
-  ref,
-  id,
-) async {
-  final repo = ref.watch(mediaRepositoryProvider);
-  return repo.mediaDetail(id);
-});
+/// Media detail for a title id (tags, relations, recommendations).
+///
+/// Stale-while-revalidate through the GraphQL cache: a title opened before
+/// paints from the persisted cache at once and revalidates in the background
+/// once its 30 minute window has passed. Still an `AsyncValue<Media>`, so the
+/// screen's `.when(...)` and `ref.invalidate(...)` keep working unchanged.
+final mediaDetailProvider = StreamProvider.family.autoDispose<Media, int>(
+  (ref, id) => swrQuery<Media?>(
+    ref,
+    document: mediaDetailDoc,
+    operation: 'MediaDetail',
+    variables: {'id': id},
+    parse: parseMediaDetail,
+    ttl: const Duration(minutes: 30),
+  ).map((result) {
+    final media = result.data;
+    if (media == null) {
+      throw AppException(ErrorKind.notFound, 'Title $id is unavailable');
+    }
+    return media;
+  }),
+  retry: noProviderRetry,
+);
 
 /// Staff profile + one page of their titles, keyed by `(staffId, page)`.
 final staffWorksProvider =

@@ -146,7 +146,7 @@ class _FilterSheetState extends State<FilterSheet> {
                   _Dropdown<MediaSort>(
                     label: 'Sort by',
                     value: _sort,
-                    items: MediaSort.values,
+                    items: MediaSort.browseOptions,
                     onChanged: (value) =>
                         setState(() => _sort = value ?? MediaSort.trending),
                     itemLabel: (value) => value.label,

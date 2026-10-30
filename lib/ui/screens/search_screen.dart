@@ -19,10 +19,11 @@ import '../router/app_router.dart';
 
 final _favouritesFormat = NumberFormat('#,###');
 
-/// Tabbed search page: Anime, Studios, Staff, Characters.
+/// Tabbed search page: Anime, Manga, Studios, Staff, Characters.
 ///
-/// Each tab keeps its own paged result set. An empty query shows the
-/// popularity ranking (Page 1); typing filters by name with a debounce.
+/// Each tab keeps its own result set and loads further pages automatically
+/// as the reader scrolls (infinite scroll). An empty query shows the
+/// popularity ranking; typing filters by name with a debounce.
 class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({this.initialQuery = '', super.key});
 
@@ -33,24 +34,42 @@ class SearchScreen extends ConsumerStatefulWidget {
 }
 
 class _SearchScreenState extends ConsumerState<SearchScreen> {
-  late final TextEditingController _controller;
-  final FocusNode _focusNode = FocusNode();
+  /// One text field and focus node per tab: every tab is its own search.
+  late final Map<SearchTab, TextEditingController> _controllers;
+  late final Map<SearchTab, FocusNode> _focusNodes;
   late final BouncyScrollController _scrollController;
   bool _showTop = false;
+
+  TextEditingController controllerFor(SearchTab tab) => _controllers[tab]!;
+  FocusNode focusNodeFor(SearchTab tab) => _focusNodes[tab]!;
 
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.initialQuery);
+    // The search state outlives this screen, so start each field from the
+    // text its tab is actually showing results for.
+    final saved = ref.read(searchControllerProvider);
+    final initial = widget.initialQuery.trim();
+    _controllers = {
+      for (final tab in SearchTab.values)
+        tab: TextEditingController(
+          text: tab == SearchTab.anime && initial.isNotEmpty
+              ? widget.initialQuery
+              : saved.queryOf(tab),
+        ),
+    };
+    _focusNodes = {for (final tab in SearchTab.values) tab: FocusNode()};
     _scrollController = BouncyScrollController();
     _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (widget.initialQuery.trim().isNotEmpty) {
-        ref.read(searchControllerProvider.notifier).submit(widget.initialQuery);
+      final notifier = ref.read(searchControllerProvider.notifier);
+      if (initial.isNotEmpty) {
+        notifier.openWithQuery(widget.initialQuery);
       } else {
-        _focusNode.requestFocus();
+        focusNodeFor(ref.read(searchControllerProvider).tab).requestFocus();
       }
+      _maybeLoadMore();
     });
   }
 
@@ -58,6 +77,24 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     if (!_scrollController.hasClients) return;
     final show = _scrollController.offset > 900;
     if (show != _showTop && mounted) setState(() => _showTop = show);
+    _maybeLoadMore();
+  }
+
+  /// Infinite scroll: ask for the next page once the reader is within a few
+  /// screens of the end. Also called after every result change, so a short
+  /// first page on a tall window keeps filling until the view scrolls.
+  void _maybeLoadMore() {
+    if (!mounted || !_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    if (position.pixels >= position.maxScrollExtent - 900) {
+      ref.read(searchControllerProvider.notifier).loadMore();
+    }
+  }
+
+  void _afterFrame(VoidCallback callback) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) callback();
+    });
   }
 
   @override
@@ -65,14 +102,14 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.initialQuery != widget.initialQuery &&
         widget.initialQuery.trim().isNotEmpty &&
-        _controller.text != widget.initialQuery) {
-      _controller.text = widget.initialQuery;
+        controllerFor(SearchTab.anime).text != widget.initialQuery) {
+      controllerFor(SearchTab.anime).text = widget.initialQuery;
       final query = widget.initialQuery;
       // Providers can't be modified while the widget tree is building
       // (didUpdateWidget runs during build), so defer to after the frame.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        ref.read(searchControllerProvider.notifier).submit(query);
+        ref.read(searchControllerProvider.notifier).openWithQuery(query);
       });
     }
   }
@@ -82,13 +119,31 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     _scrollController
       ..removeListener(_onScroll)
       ..dispose();
-    _controller.dispose();
-    _focusNode.dispose();
+    for (final c in _controllers.values) {
+      c.dispose();
+    }
+    for (final f in _focusNodes.values) {
+      f.dispose();
+    }
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    // New results landed (or a page was appended): top up if still near end.
+    ref.listen(
+      searchControllerProvider.select(_loadSignature),
+      (_, _) => _afterFrame(_maybeLoadMore),
+    );
+    // A different tab, query or sort is a different result set: start at top.
+    ref.listen(searchControllerProvider.select(_viewKey), (previous, next) {
+      if (previous == null || previous == next) return;
+      _afterFrame(() {
+        if (_scrollController.hasClients && _scrollController.offset > 0) {
+          _scrollController.jumpTo(0);
+        }
+      });
+    });
     return Stack(
       children: [
         SmoothCustomScrollView(
@@ -96,12 +151,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           slivers: const [
             SliverToBoxAdapter(child: _SearchHeader()),
             SliverToBoxAdapter(child: _TabSearchField()),
-            SliverToBoxAdapter(child: _AnimeSortRow()),
-            SliverToBoxAdapter(child: _PageNav()),
+            SliverToBoxAdapter(child: _MediaSortRow()),
             SliverToBoxAdapter(
               child: SizedBox(height: Tokens.space8),
             ),
             _ResultsSlivers(),
+            SliverToBoxAdapter(child: _LoadMoreFooter()),
             SliverAppFooter(),
           ],
         ),
@@ -122,7 +177,30 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 }
 
-/// Title + subtitle + tab bar (Anime / Studios / Staff / Characters).
+/// Changes whenever the active tab's loading state or item count changes.
+(SearchTab, LoadStatus, int) _loadSignature(SearchState s) => switch (s.tab) {
+      SearchTab.anime => (s.tab, s.anime.status, s.anime.items.length),
+      SearchTab.manga => (s.tab, s.manga.status, s.manga.items.length),
+      SearchTab.studios => (s.tab, s.studios.status, s.studios.items.length),
+      SearchTab.staff => (s.tab, s.staff.status, s.staff.items.length),
+      SearchTab.characters => (
+          s.tab,
+          s.characters.status,
+          s.characters.items.length,
+        ),
+    };
+
+/// Identifies the visible result set (tab + query + sort).
+(SearchTab, String, MediaSort?) _viewKey(SearchState s) => (
+      s.tab,
+      normalizeSearchText(s.query),
+      switch (s.tab) {
+        SearchTab.anime || SearchTab.manga => s.sortOf(s.tab),
+        _ => null,
+      },
+    );
+
+/// Title + subtitle + tab bar (Anime / Manga / Studios / Staff / Characters).
 class _SearchHeader extends ConsumerWidget {
   const _SearchHeader();
 
@@ -181,6 +259,7 @@ class _SearchHeader extends ConsumerWidget {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               tabButton(SearchTab.anime, Icons.movie_outlined, 'Anime'),
+              tabButton(SearchTab.manga, Icons.menu_book_outlined, 'Manga'),
               tabButton(SearchTab.studios, Icons.business_outlined, 'Studios'),
               tabButton(SearchTab.staff, Icons.person_outline, 'Staff'),
               tabButton(
@@ -225,14 +304,13 @@ class _TabSearchField extends ConsumerWidget {
     );
     final controller = ref.read(searchControllerProvider.notifier);
     final parent = context.findAncestorStateOfType<_SearchScreenState>();
-    final textController = parent?._controller;
-    final focusNode = parent?._focusNode;
-    if (textController == null || focusNode == null) {
-      return const SizedBox.shrink();
-    }
+    if (parent == null) return const SizedBox.shrink();
+    final textController = parent.controllerFor(tab);
+    final focusNode = parent.focusNodeFor(tab);
 
     final hint = switch (tab) {
       SearchTab.anime => 'Search anime by name...',
+      SearchTab.manga => 'Search manga by name...',
       SearchTab.studios => 'Search studios by name...',
       SearchTab.staff => 'Search staff by name...',
       SearchTab.characters => 'Search characters by name...',
@@ -253,17 +331,19 @@ class _TabSearchField extends ConsumerWidget {
           // outer container, so it always wraps the text, clear button and
           // search action as a single whole outline.
           child: LensSearchField(
+            // A separate field (own text, focus and clear button) per tab.
+            key: ValueKey(tab),
             controller: textController,
             focusNode: focusNode,
             hintLong: hint,
             hintShort: hint,
             showKbdChip: false,
             showClear: hasQuery,
-            onChanged: controller.onQueryChanged,
-            onSubmitted: controller.submit,
+            onChanged: (value) => controller.onQueryChanged(tab, value),
+            onSubmitted: (value) => controller.submit(tab, value),
             onClear: () {
               textController.clear();
-              controller.clear();
+              controller.clear(tab);
             },
           ),
         ),
@@ -272,19 +352,31 @@ class _TabSearchField extends ConsumerWidget {
   }
 }
 
-/// Sort selector for the Anime tab (other tabs are favourites-ranked).
-class _AnimeSortRow extends ConsumerWidget {
-  const _AnimeSortRow();
+/// Sort selector for the Anime and Manga tabs (other tabs are
+/// favourites-ranked).
+class _MediaSortRow extends ConsumerWidget {
+  const _MediaSortRow();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final tab = ref.watch(searchControllerProvider.select((s) => s.tab));
-    if (tab != SearchTab.anime) return const SizedBox.shrink();
+    if (tab != SearchTab.anime && tab != SearchTab.manga) {
+      return const SizedBox.shrink();
+    }
+    final isManga = tab == SearchTab.manga;
+    // The sort in effect for this tab's text, and whether there is text:
+    // "Best match" only exists while searching for something.
     final sort = ref.watch(
-      searchControllerProvider.select((s) => s.animeSort),
+      searchControllerProvider.select((s) => s.sortOf(tab)),
+    );
+    final hasQuery = ref.watch(
+      searchControllerProvider.select(
+        (s) => normalizeSearchText(s.queryOf(tab)).isNotEmpty,
+      ),
     );
     final controller = ref.read(searchControllerProvider.notifier);
-    const options = [
+    final options = [
+      if (hasQuery) MediaSort.searchMatch,
       MediaSort.popularity,
       MediaSort.trending,
       MediaSort.score,
@@ -303,6 +395,8 @@ class _AnimeSortRow extends ConsumerWidget {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 220),
           child: DropdownButton<MediaSort>(
+            // Each tab keeps its own sort, so rebuild the menu per tab.
+            key: ValueKey(tab),
             value: options.contains(sort) ? sort : MediaSort.popularity,
             isExpanded: true,
             underline: const SizedBox.shrink(),
@@ -318,7 +412,12 @@ class _AnimeSortRow extends ConsumerWidget {
                 ),
             ],
             onChanged: (s) {
-              if (s != null) controller.setAnimeSort(s);
+              if (s == null) return;
+              if (isManga) {
+                controller.setMangaSort(s);
+              } else {
+                controller.setAnimeSort(s);
+              }
             },
           ),
         ),
@@ -327,79 +426,66 @@ class _AnimeSortRow extends ConsumerWidget {
   }
 }
 
-/// "Characters · Page 1" label with prev/next arrows.
-class _PageNav extends ConsumerWidget {
-  const _PageNav();
+/// End-of-list status: a spinner while the next page loads, or a retry
+/// prompt if that request failed.
+class _LoadMoreFooter extends ConsumerWidget {
+  const _LoadMoreFooter();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final tab = ref.watch(searchControllerProvider.select((s) => s.tab));
-    final page = ref.watch(
-      searchControllerProvider.select((s) => switch (s.tab) {
-            SearchTab.anime => s.anime.page,
-            SearchTab.studios => s.studios.page,
-            SearchTab.staff => s.staff.page,
-            SearchTab.characters => s.characters.page,
-          }),
-    );
-    final hasNext = ref.watch(
-      searchControllerProvider.select((s) => switch (s.tab) {
-            SearchTab.anime => s.anime.hasNextPage,
-            SearchTab.studios => s.studios.hasNextPage,
-            SearchTab.staff => s.staff.hasNextPage,
-            SearchTab.characters => s.characters.hasNextPage,
-          }),
-    );
-    final isLoading = ref.watch(
-      searchControllerProvider.select((s) => switch (s.tab) {
-            SearchTab.anime => s.anime.status == LoadStatus.loading,
-            SearchTab.studios => s.studios.status == LoadStatus.loading,
-            SearchTab.staff => s.staff.status == LoadStatus.loading,
-            SearchTab.characters =>
-              s.characters.status == LoadStatus.loading,
-          }),
-    );
-    final controller = ref.read(searchControllerProvider.notifier);
-    final label = switch (tab) {
-      SearchTab.anime => 'Anime',
-      SearchTab.studios => 'Studios',
-      SearchTab.staff => 'Staff',
-      SearchTab.characters => 'Characters',
-    };
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        Tokens.space16,
-        Tokens.space8,
-        Tokens.space16,
-        0,
-      ),
-      child: Row(
-        children: [
-          Text(
-            '$label · Page $page',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+    final (appending, failed) = ref.watch(
+      searchControllerProvider.select((s) {
+        final (isAppending, status, count) = switch (s.tab) {
+          SearchTab.anime => (
+              s.anime.isAppending,
+              s.anime.status,
+              s.anime.items.length,
             ),
+          SearchTab.manga => (
+              s.manga.isAppending,
+              s.manga.status,
+              s.manga.items.length,
+            ),
+          SearchTab.studios => (
+              s.studios.isAppending,
+              s.studios.status,
+              s.studios.items.length,
+            ),
+          SearchTab.staff => (
+              s.staff.isAppending,
+              s.staff.status,
+              s.staff.items.length,
+            ),
+          SearchTab.characters => (
+              s.characters.isAppending,
+              s.characters.status,
+              s.characters.items.length,
+            ),
+        };
+        return (isAppending, status == LoadStatus.error && count > 0);
+      }),
+    );
+    if (failed) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: Tokens.space24),
+        child: Center(
+          child: TextButton.icon(
+            onPressed: ref.read(searchControllerProvider.notifier).retryLoadMore,
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text("Couldn't load more · Retry"),
           ),
-          const Spacer(),
-          IconButton.outlined(
-            tooltip: 'Previous page',
-            visualDensity: VisualDensity.compact,
-            onPressed: page <= 1 || isLoading
-                ? null
-                : controller.previousPage,
-            icon: const Icon(Icons.chevron_left, size: 20),
-          ),
-          const SizedBox(width: Tokens.space8),
-          IconButton.outlined(
-            tooltip: 'Next page',
-            visualDensity: VisualDensity.compact,
-            onPressed: !hasNext || isLoading ? null : controller.nextPage,
-            icon: const Icon(Icons.chevron_right, size: 20),
-          ),
-        ],
+        ),
+      );
+    }
+    if (!appending) return const SizedBox.shrink();
+    return const Padding(
+      padding: EdgeInsets.only(bottom: Tokens.space24),
+      child: Center(
+        child: SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
       ),
     );
   }
@@ -412,7 +498,8 @@ class _ResultsSlivers extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final tab = ref.watch(searchControllerProvider.select((s) => s.tab));
     return switch (tab) {
-      SearchTab.anime => const _AnimeResults(),
+      SearchTab.anime => const _MediaResults(tab: SearchTab.anime),
+      SearchTab.manga => const _MediaResults(tab: SearchTab.manga),
       SearchTab.studios => const _StudioResults(),
       SearchTab.staff => const _StaffResults(),
       SearchTab.characters => const _CharacterResults(),
@@ -420,48 +507,50 @@ class _ResultsSlivers extends ConsumerWidget {
   }
 }
 
-class _AnimeResults extends ConsumerWidget {
-  const _AnimeResults();
+/// Poster-grid results shared by the Anime and Manga tabs.
+class _MediaResults extends ConsumerWidget {
+  const _MediaResults({required this.tab});
+
+  final SearchTab tab;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final status = ref.watch(
-      searchControllerProvider.select((s) => s.anime.status),
+    final isManga = tab == SearchTab.manga;
+    final noun = isManga ? 'manga' : 'anime';
+    final page = ref.watch(
+      searchControllerProvider.select((s) => isManga ? s.manga : s.anime),
     );
     final query = ref.watch(searchControllerProvider.select((s) => s.query));
-    final results = ref.watch(
-      searchControllerProvider.select((s) => s.anime.items),
-    );
-    final errorMessage = ref.watch(
-      searchControllerProvider.select((s) => s.anime.errorMessage),
-    );
+    final results = page.items;
     final controller = ref.read(searchControllerProvider.notifier);
 
-    return switch (status) {
-      LoadStatus.initial => const SliverEmpty(
+    return switch (page.status) {
+      LoadStatus.initial => SliverEmpty(
         title: 'Start typing',
-        message: 'Search anime by title — for example "frieren".',
+        message: isManga
+            ? 'Search manga by title — for example "berserk".'
+            : 'Search anime by title — for example "frieren".',
         icon: Icons.search,
       ),
       LoadStatus.loading when results.isEmpty => const SliverToBoxAdapter(
-        child: LoadingPosterGrid(),
+        child: LoadingPosterGrid(columnsForWidth: browsePosterColumns),
       ),
       // Keep-previous-data: show the old grid while the next page loads.
-      LoadStatus.loading => SliverPosterGrid(items: results, hasMore: true),
+      LoadStatus.loading => SliverPosterGrid(items: results, compact: true),
       LoadStatus.error when results.isEmpty => SliverError(
-        message: errorMessage ?? 'Search failed.',
+        message: page.errorMessage ?? 'Search failed.',
         onRetry: controller.runSearch,
       ),
-      LoadStatus.error => SliverPosterGrid(items: results),
+      LoadStatus.error => SliverPosterGrid(items: results, compact: true),
       LoadStatus.success when results.isEmpty => SliverEmpty(
         title: 'No results',
         message: query.trim().isNotEmpty
             ? 'Nothing matched "${query.trim()}". '
                   'Try a different spelling or fewer words.'
-            : 'No anime found.',
+            : 'No $noun found.',
         icon: Icons.search_off,
       ),
-      LoadStatus.success => SliverPosterGrid(items: results),
+      LoadStatus.success => SliverPosterGrid(items: results, compact: true),
     };
   }
 }
@@ -602,18 +691,38 @@ class _CharacterResults extends ConsumerWidget {
 }
 
 /// Responsive grid of horizontal person/studio cards.
-class _PeopleGrid extends StatelessWidget {
+class _PeopleGrid extends StatefulWidget {
   const _PeopleGrid({required this.itemCount, required this.itemBuilder});
 
   final int itemCount;
   final Widget Function(BuildContext context, int index) itemBuilder;
 
   @override
+  State<_PeopleGrid> createState() => _PeopleGridState();
+}
+
+class _PeopleGridState extends State<_PeopleGrid> {
+  // SliverLayoutBuilder calls its builder on every scroll frame; handing back
+  // the same grid widget until the width or inputs change stops Flutter from
+  // rebuilding every visible card on each frame.
+  Widget? _cached;
+  double _cachedWidth = -1;
+
+  @override
+  void didUpdateWidget(covariant _PeopleGrid oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _cached = null;
+  }
+
+  @override
   Widget build(BuildContext context) {
     return SliverLayoutBuilder(
       builder: (context, constraints) {
-        final columns = _peopleColumns(constraints.crossAxisExtent);
-        return SliverPadding(
+        final width = constraints.crossAxisExtent;
+        final cached = _cached;
+        if (cached != null && _cachedWidth == width) return cached;
+        final columns = _peopleColumns(width);
+        final grid = SliverPadding(
           padding: const EdgeInsets.fromLTRB(
             Tokens.space16,
             Tokens.space8,
@@ -625,22 +734,26 @@ class _PeopleGrid extends StatelessWidget {
               crossAxisCount: columns,
               mainAxisSpacing: Tokens.space12,
               crossAxisSpacing: Tokens.space12,
-              childAspectRatio: 2.9,
+              mainAxisExtent: 84,
             ),
             addAutomaticKeepAlives: false,
             addRepaintBoundaries: true,
-            itemCount: itemCount,
+            itemCount: widget.itemCount,
             itemBuilder: (context, index) => RepaintBoundary(
-              child: itemBuilder(context, index),
+              child: widget.itemBuilder(context, index),
             ),
           ),
         );
+        _cachedWidth = width;
+        _cached = grid;
+        return grid;
       },
     );
   }
 }
 
 int _peopleColumns(double width) {
+  if (width >= 1500) return 5;
   if (width >= 1250) return 4;
   if (width >= 950) return 3;
   if (width >= 620) return 2;
@@ -690,8 +803,8 @@ class _PersonImage extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(Tokens.radiusSm),
       child: SizedBox(
-        width: 56,
-        height: 78,
+        width: 46,
+        height: 68,
         child: url.isEmpty
             ? Container(
                 color: theme.disabledColor.withValues(alpha: 0.15),
@@ -703,6 +816,9 @@ class _PersonImage extends StatelessWidget {
             : Image.network(
                 url,
                 fit: BoxFit.cover,
+                // Thumbnails are ~46px wide; decoding the full portrait is
+                // wasted memory/CPU when scrolling long lists.
+                cacheWidth: 128,
                 gaplessPlayback: true,
                 filterQuality: FilterQuality.low,
                 errorBuilder: (context, error, stack) => Container(
@@ -869,8 +985,8 @@ class _StudioCard extends StatelessWidget {
           spacing: Tokens.space12,
           children: [
             Container(
-              width: 56,
-              height: 78,
+              width: 46,
+              height: 68,
               decoration: BoxDecoration(
                 color: theme.colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(Tokens.radiusSm),

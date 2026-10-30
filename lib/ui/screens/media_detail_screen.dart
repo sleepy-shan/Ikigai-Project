@@ -12,6 +12,7 @@ import '../../data/models/media_entry.dart';
 import '../../state/history_controller.dart';
 import '../../state/media_providers.dart';
 import '../../state/my_lists_controller.dart';
+import '../../state/tracked_entries_notifier.dart' show optimisticEntriesProvider;
 import '../components/poster_card.dart';
 import '../components/progress_editor.dart';
 import '../components/rails.dart';
@@ -542,6 +543,10 @@ class _TrackingPanel extends ConsumerWidget {
     final controller = ref.read(myListsControllerProvider.notifier);
     final entry = this.entry;
     final total = media.totalUnits;
+    // True while an edit is queued or on its way to AniList.
+    final syncing = ref.watch(
+      optimisticEntriesProvider.select((m) => m.containsKey(media.id)),
+    );
 
     return Card(
       child: Padding(
@@ -567,8 +572,9 @@ class _TrackingPanel extends ConsumerWidget {
                 entry == null
                     ? 'Save this ${media.type.label.toLowerCase()} to your list to track '
                           'progress and score.'
-                    : 'On your list • updated ${Formatters.timeAgo(entry.updatedAt)}',
-                key: ValueKey(entry == null ? 'empty' : entry.updatedAt),
+                    : 'On your list • updated ${Formatters.timeAgo(entry.updatedAt)}'
+                          '${syncing ? ' • syncing to AniList…' : ''}',
+                key: ValueKey(entry == null ? 'empty' : '${entry.updatedAt}$syncing'),
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),

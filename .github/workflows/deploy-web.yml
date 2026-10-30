@@ -27,6 +27,9 @@ jobs:
 
       - run: flutter pub get
 
+      # freezed / json_serializable output is not committed.
+      - run: dart run build_runner build --delete-conflicting-outputs
+
       - run: flutter analyze
 
       # Guards the auth/session regressions (browser refresh, rate-limited

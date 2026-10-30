@@ -5,9 +5,11 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/app_motion.dart';
 import '../../core/theme/app_scroll.dart';
 import '../../core/theme/design_tokens.dart';
+import '../../core/utils/app_exception.dart';
 import '../../data/models/media_entry.dart';
 import '../../state/load_state.dart';
 import '../../state/my_lists_controller.dart';
+import '../../state/providers.dart' show authStateProvider;
 import '../components/media_grid.dart';
 import '../components/app_footer.dart';
 import '../components/sliver_headers.dart';
@@ -147,6 +149,7 @@ class _Header extends ConsumerWidget {
               ],
             ),
           ),
+          const _ImportButton(),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 170),
             child: DropdownButton<ListsSort>(
@@ -172,6 +175,67 @@ class _Header extends ConsumerWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// "Import from AniList": copies the signed-in user's AniList anime and manga
+/// lists into the local watchlist (only titles not tracked here yet).
+class _ImportButton extends ConsumerStatefulWidget {
+  const _ImportButton();
+
+  @override
+  ConsumerState<_ImportButton> createState() => _ImportButtonState();
+}
+
+class _ImportButtonState extends ConsumerState<_ImportButton> {
+  bool _busy = false;
+
+  Future<void> _run() async {
+    setState(() => _busy = true);
+    String message;
+    var isError = false;
+    try {
+      final added = await ref
+          .read(myListsControllerProvider.notifier)
+          .importFromAniList();
+      message = added == 0
+          ? 'Your watchlist already has everything from AniList'
+          : 'Imported $added ${added == 1 ? 'title' : 'titles'} from AniList';
+    } on AppException catch (error) {
+      message = error.userMessage;
+      isError = true;
+    } on Object {
+      message = 'Could not import your AniList list';
+      isError = true;
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: isError ? Tokens.danger : null,
+        ),
+      );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final signedIn = ref.watch(
+      authStateProvider.select((a) => a.value != null),
+    );
+    if (!signedIn) return const SizedBox.shrink();
+    return IconButton(
+      tooltip: 'Import from AniList',
+      onPressed: _busy ? null : _run,
+      icon: _busy
+          ? const SizedBox.square(
+              dimension: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.cloud_download_outlined),
     );
   }
 }
