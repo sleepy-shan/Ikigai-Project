@@ -24,6 +24,16 @@ import 'package:flutter/scheduler.dart';
 /// - [BouncySmoothScrollView]  – drop-in `CustomScrollView` that wires all of
 ///   the above together.
 
+/// True while any page built on [BouncyScrollbar] is being scrolled.
+///
+/// Hover effects and entrance animations consult this so that fast scrolling
+/// does not also animate every card that slides under the pointer or into
+/// view (dozens of simultaneous scale / fade / shadow animations is what
+/// makes a dense grid stutter).
+abstract final class ScrollBusy {
+  static bool isScrolling = false;
+}
+
 // ───────────────────────────── controller ─────────────────────────────
 
 class BouncyScrollController extends ScrollController {
@@ -314,7 +324,16 @@ class _BouncyScrollbarState extends State<BouncyScrollbar> {
   /// scrollbar widget with `setState`.
   final ValueNotifier<ScrollMetrics?> _metrics =
       ValueNotifier<ScrollMetrics?>(null);
+
+  /// Thumb geometry. Only the thumb layer listens to this, so the rest of the
+  /// bar (hit strip, hover region, fade) is not rebuilt on scroll frames.
+  final ValueNotifier<_Geo?> _geoNotifier = ValueNotifier<_Geo?>(null);
+
+  /// Whether the content scrolls at all; flips rarely.
+  final ValueNotifier<bool> _scrollable = ValueNotifier<bool>(false);
   final Stopwatch _clock = Stopwatch()..start();
+  ScrollMetrics? _published;
+  _Geo? _publishedGeo;
   bool _visible = false;
   bool _hover = false;
   bool _drag = false;
@@ -328,6 +347,9 @@ class _BouncyScrollbarState extends State<BouncyScrollbar> {
   void dispose() {
     _hideTimer?.cancel();
     _metrics.dispose();
+    _geoNotifier.dispose();
+    _scrollable.dispose();
+    ScrollBusy.isScrolling = false;
     super.dispose();
   }
 
@@ -345,15 +367,41 @@ class _BouncyScrollbarState extends State<BouncyScrollbar> {
 
   /// Publishes new metrics to the thumb. Notifications can arrive during
   /// layout, where rebuilding is not allowed, so those wait for the frame end.
+  ///
+  /// On a long (infinite-scroll) list one pixel of scrolling moves the thumb a
+  /// small fraction of a pixel, so most frames would rebuild the thumb for no
+  /// visible change. Those are skipped; anything that changes the extents or
+  /// moves/resizes the thumb by half a pixel or more still gets through.
   void _setMetrics(ScrollMetrics m) {
     if (!mounted) return;
+    final geo = _geo(m);
+    final prev = _published;
+    final prevGeo = _publishedGeo;
+    if (prev != null &&
+        prevGeo != null &&
+        geo != null &&
+        prev.maxScrollExtent == m.maxScrollExtent &&
+        prev.minScrollExtent == m.minScrollExtent &&
+        prev.viewportDimension == m.viewportDimension &&
+        (geo.offset - prevGeo.offset).abs() < 0.5 &&
+        (geo.length - prevGeo.length).abs() < 0.5) {
+      return;
+    }
+    _published = m;
+    _publishedGeo = geo;
+    void publish() {
+      _metrics.value = m;
+      _geoNotifier.value = geo;
+      if (_scrollable.value != (geo != null)) _scrollable.value = geo != null;
+    }
+
     final phase = SchedulerBinding.instance.schedulerPhase;
     if (phase == SchedulerPhase.persistentCallbacks) {
       SchedulerBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _metrics.value = m;
+        if (mounted) publish();
       });
     } else {
-      _metrics.value = m;
+      publish();
     }
   }
 
@@ -372,6 +420,11 @@ class _BouncyScrollbarState extends State<BouncyScrollbar> {
 
   bool _onScroll(ScrollNotification n) {
     if (n.depth != 0 || n.metrics.axis != widget.axis) return false;
+    if (n is ScrollEndNotification) {
+      ScrollBusy.isScrolling = false;
+    } else if (n is ScrollStartNotification || n is ScrollUpdateNotification) {
+      ScrollBusy.isScrolling = true;
+    }
     _setMetrics(n.metrics);
     if (!_visible) _safeSetState(() => _visible = true);
     _poke();
@@ -478,16 +531,13 @@ class _BouncyScrollbarState extends State<BouncyScrollbar> {
     );
   }
 
-  Widget _bar(_Geo g, Color base) {
+  /// The thumb. Length follows the scroll position exactly (no animation lag
+  /// while overscroll squashes it); only the hover thickness is animated.
+  Widget _thumb(_Geo g, Color base) {
     final active = _hover || _drag;
-    final shown = _interactive;
     final thick = active ? widget.hoverThickness : widget.thickness;
-    final stripExtent = widget.hoverThickness + widget.margin * 2;
     final alpha = _drag ? 0.78 : (_hover ? 0.58 : 0.36);
-
-    // Length follows the scroll position exactly (no animation lag while
-    // overscroll squashes it); only the hover thickness is animated.
-    final thumb = SizedBox(
+    return SizedBox(
       width: _vertical ? null : g.length,
       height: _vertical ? g.length : null,
       child: AnimatedContainer(
@@ -501,6 +551,13 @@ class _BouncyScrollbarState extends State<BouncyScrollbar> {
         ),
       ),
     );
+  }
+
+  /// Hit strip + fade. Built when hover / drag / visibility change, not on
+  /// scroll frames: only the small thumb layer inside it follows the scroll.
+  Widget _bar(Color base) {
+    final shown = _interactive;
+    final stripExtent = widget.hoverThickness + widget.margin * 2;
 
     final strip = SizedBox(
       width: _vertical ? stripExtent : double.infinity,
@@ -529,16 +586,22 @@ class _BouncyScrollbarState extends State<BouncyScrollbar> {
           child: AnimatedOpacity(
             opacity: shown ? 1 : 0,
             duration: Duration(milliseconds: shown ? 120 : 280),
-            child: Stack(
-              children: [
-                Positioned(
-                  top: _vertical ? g.offset : null,
-                  bottom: _vertical ? null : widget.margin,
-                  right: _vertical ? widget.margin : null,
-                  left: _vertical ? null : g.offset,
-                  child: RepaintBoundary(child: thumb),
-                ),
-              ],
+            child: ValueListenableBuilder<_Geo?>(
+              valueListenable: _geoNotifier,
+              builder: (context, g, _) {
+                if (g == null) return const SizedBox.shrink();
+                return Stack(
+                  children: [
+                    Positioned(
+                      top: _vertical ? g.offset : null,
+                      bottom: _vertical ? null : widget.margin,
+                      right: _vertical ? widget.margin : null,
+                      left: _vertical ? null : g.offset,
+                      child: RepaintBoundary(child: _thumb(g, base)),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -567,15 +630,11 @@ class _BouncyScrollbarState extends State<BouncyScrollbar> {
             ),
           ),
         ),
-        // Only this layer rebuilds as the list scrolls.
         Positioned.fill(
-          child: ValueListenableBuilder<ScrollMetrics?>(
-            valueListenable: _metrics,
-            builder: (context, metrics, _) {
-              final g = _geo(metrics);
-              if (g == null) return const SizedBox.shrink();
-              return _bar(g, base);
-            },
+          child: ValueListenableBuilder<bool>(
+            valueListenable: _scrollable,
+            builder: (context, scrollable, _) =>
+                scrollable ? _bar(base) : const SizedBox.shrink(),
           ),
         ),
       ],

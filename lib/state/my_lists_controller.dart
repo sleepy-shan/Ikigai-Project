@@ -1,10 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/graphql/models/media_list_entry.dart' show MediaListStatus;
+import '../core/utils/app_exception.dart';
+import '../data/models/account.dart' show ScoreFormat;
 import '../data/models/media.dart';
 import '../data/models/media_entry.dart';
 import '../data/repositories/tracking_repository.dart';
 import 'load_state.dart';
+import 'media_providers.dart' show mediaRepositoryProvider;
 import 'providers.dart';
+import 'tracked_entries_notifier.dart' show optimisticEntriesProvider;
 
 /// Which entries the "My Lists" screen shows.
 enum ListsFilter {
@@ -168,29 +175,143 @@ class MyListsController extends Notifier<MyListsState> {
     int? progress,
     int? score,
     String? notes,
-  }) {
-    return _repo.addOrUpdate(
+  }) async {
+    final entry = await _repo.addOrUpdate(
       media: media,
       status: status,
       progress: progress,
       score: score,
       notes: notes,
     );
+    _mirror(entry, progress: progress != null, status: true, score: score != null);
+    return entry;
   }
 
-  Future<void> setStatus(int mediaId, ListStatus status) =>
-      _repo.setStatus(mediaId, status);
+  Future<void> setStatus(int mediaId, ListStatus status) async {
+    final entry = await _repo.setStatus(mediaId, status);
+    _mirror(entry, status: true);
+  }
 
-  Future<void> setProgress(int mediaId, int progress) =>
-      _repo.setProgress(mediaId, progress);
+  Future<void> setProgress(int mediaId, int progress) async {
+    final entry = await _repo.setProgress(mediaId, progress);
+    // The local repo may also change the status (e.g. last episode -> done).
+    _mirror(entry, progress: true, status: true);
+  }
 
-  Future<void> incrementProgress(int mediaId) =>
-      _repo.incrementProgress(mediaId);
+  Future<void> incrementProgress(int mediaId) async {
+    final entry = await _repo.incrementProgress(mediaId);
+    _mirror(entry, progress: true, status: true);
+  }
 
-  Future<void> setScore(int mediaId, int? score) =>
-      _repo.setScore(mediaId, score);
+  Future<void> setScore(int mediaId, int? score) async {
+    final entry = await _repo.setScore(mediaId, score);
+    _mirror(entry, score: true);
+  }
 
-  Future<void> remove(int mediaId) => _repo.remove(mediaId);
+  /// Local tracking stays the source of truth for the UI (guests keep working
+  /// exactly as before). When signed in, the same edit is also synced to
+  /// AniList through the debounced, absolute-value optimistic notifier. A sync
+  /// failure never fails the local edit; it surfaces via
+  /// `entrySyncErrorProvider`.
+  ///
+  /// Not mirrored yet: removing an entry (needs the AniList list-entry id).
+  void _mirror(
+    MediaEntry entry, {
+    bool progress = false,
+    bool status = false,
+    bool score = false,
+  }) {
+    if (ref.read(authRepositoryProvider).accessToken == null) return;
+    unawaited(
+      ref.read(optimisticEntriesProvider.notifier).applyEdit(
+        mediaId: entry.mediaId,
+        progress: progress ? entry.progress : null,
+        status: status ? _toRemote(entry.status) : null,
+        score10: score ? (entry.score ?? 0) : null,
+      ),
+    );
+  }
+
+  static MediaListStatus _toRemote(ListStatus s) => switch (s) {
+    ListStatus.watching => MediaListStatus.current,
+    ListStatus.planning => MediaListStatus.planning,
+    ListStatus.completed => MediaListStatus.completed,
+    ListStatus.paused => MediaListStatus.paused,
+    ListStatus.dropped => MediaListStatus.dropped,
+  };
+
+  Future<void> remove(int mediaId) async {
+    await _repo.remove(mediaId);
+    if (ref.read(authRepositoryProvider).accessToken == null) return;
+    unawaited(ref.read(optimisticEntriesProvider.notifier).removeEntry(mediaId));
+  }
+
+  /// Copies the signed-in user's AniList anime and manga lists into the local
+  /// list. Only titles that are not tracked locally are added, so nothing the
+  /// user already has here is overwritten. Goes straight to the local
+  /// repository (not [addTo]) so the import is never echoed back to AniList.
+  ///
+  /// Returns how many titles were added. Throws [AppException] when signed
+  /// out or when AniList cannot be reached.
+  Future<int> importFromAniList() async {
+    final user = await ref.read(authStateProvider.future);
+    final token = ref.read(authRepositoryProvider).accessToken;
+    if (user == null || token == null) {
+      throw const AppException(
+        ErrorKind.unauthorized,
+        'Sign in with AniList to import your list',
+      );
+    }
+    final media = ref.read(mediaRepositoryProvider);
+    final incoming = <MediaEntry>[];
+    for (final type in MediaType.values) {
+      final remote = await media.accountList(
+        userId: user.id,
+        token: token,
+        type: type,
+      );
+      for (final r in remote) {
+        final now = DateTime.now();
+        final status = _fromRemote(r.status);
+        incoming.add(
+          MediaEntry(
+            mediaId: r.media.id,
+            type: r.media.type,
+            title: r.media.title,
+            coverUrl: r.media.coverUrl,
+            totalUnits: r.media.totalUnits,
+            status: status,
+            progress: r.progress,
+            score: _scoreTo10(r.score, r.scoreFormat),
+            startedAt: r.progress > 0 ? (r.updatedAt ?? now) : null,
+            completedAt: status == ListStatus.completed
+                ? (r.updatedAt ?? now)
+                : null,
+            createdAt: r.updatedAt ?? now,
+            updatedAt: r.updatedAt ?? now,
+          ),
+        );
+      }
+    }
+    return _repo.importEntries(incoming);
+  }
+
+  static ListStatus _fromRemote(String wire) => wire.toUpperCase() == 'REPEATING'
+      ? ListStatus.watching
+      : ListStatus.fromWire(wire);
+
+  /// Converts an AniList score in the user's own format to the local 0-10
+  /// scale (null when unrated).
+  static int? _scoreTo10(double? score, ScoreFormat format) {
+    if (score == null || score <= 0) return null;
+    final value = switch (format) {
+      ScoreFormat.point100 => score / 10,
+      ScoreFormat.point10Decimal || ScoreFormat.point10 => score,
+      ScoreFormat.point5 => score * 2,
+      ScoreFormat.point3 => score * 3,
+    };
+    return value.round().clamp(1, 10);
+  }
 
   Future<void> clearAll() => _repo.clear();
 

@@ -109,7 +109,10 @@ class _PosterImage extends StatelessWidget {
           borderRadius: BorderRadius.circular(
             compact ? Tokens.radiusMd : Tokens.radiusLg,
           ),
-          boxShadow: Tokens.cardShadow(theme.brightness),
+          // A 20px blurred shadow per card is the costliest paint in a dense
+          // grid; compact cards rely on the hairline border instead.
+          boxShadow:
+              compact ? null : Tokens.cardShadow(theme.brightness),
           border: Border.all(
             color: theme.brightness == Brightness.dark
                 ? Colors.white.withValues(alpha: 0.09)
@@ -132,7 +135,9 @@ class _PosterImage extends StatelessWidget {
                   builder: (context, constraints) {
                     final dpr = MediaQuery.devicePixelRatioOf(context);
                     final cacheWidth = constraints.maxWidth.isFinite
-                        ? (constraints.maxWidth * dpr).ceil().clamp(120, 640).toInt()
+                        ? (((constraints.maxWidth * dpr) / 40).ceil() * 40)
+                            .clamp(120, 640)
+                            .toInt()
                         : null;
                     return Image.network(
                       url,
@@ -142,15 +147,10 @@ class _PosterImage extends StatelessWidget {
                       filterQuality: FilterQuality.low,
                       loadingBuilder: (context, child, progress) {
                         if (progress == null) return child;
+                        // Static fill: a spinner per card means dozens of
+                        // running tickers while a grid is scrolling in.
                         return ColoredBox(
                           color: theme.disabledColor.withValues(alpha: 0.12),
-                          child: const Center(
-                            child: SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          ),
                         );
                       },
                       errorBuilder: (context, error, stack) =>

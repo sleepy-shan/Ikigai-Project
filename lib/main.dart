@@ -9,6 +9,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app.dart';
 import 'core/utils/url_cleaner.dart';
 import 'data/repositories/auth_repository.dart';
+import 'data/graphql/graphql_bootstrap.dart';
+import 'state/graphql_providers.dart';
 import 'state/providers.dart';
 
 Future<void> main() async {
@@ -30,6 +32,9 @@ Future<void> main() async {
   usePathUrlStrategy();
 
   final prefs = await _loadPreferences();
+
+  // GraphQL cache (IndexedDB via Hive). Never throws: falls back to memory.
+  final gql = await openGqlStorage();
 
   // AniList OAuth implicit flow: AniList redirects back to the registered
   // Redirect URL with `#access_token=...&expires_in=...`. Capture it once and
@@ -53,7 +58,10 @@ Future<void> main() async {
 
   runApp(
     ProviderScope(
-      overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+      overrides: [
+        sharedPreferencesProvider.overrideWithValue(prefs),
+        gqlStorageProvider.overrideWithValue(gql),
+      ],
       child: const IkigaiApp(),
     ),
   );

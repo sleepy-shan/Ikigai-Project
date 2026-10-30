@@ -4,9 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/utils/app_exception.dart';
 import '../data/models/airing_schedule.dart';
 import '../data/models/media.dart';
-import '../data/repositories/media_repository.dart';
 import 'load_state.dart';
-import 'media_providers.dart';
+import 'gql_catalog.dart';
 import 'providers.dart';
 
 /// Which section of the release calendar is visible.
@@ -172,7 +171,7 @@ class CalendarState {
 /// the user taps prev/next rapidly. While reloading, previous [items] are
 /// kept so the list does not flash empty (keep-previous-data).
 class CalendarController extends Notifier<CalendarState> {
-  MediaRepository get _repo => ref.read(mediaRepositoryProvider);
+  GqlCatalog get _repo => ref.read(gqlCatalogProvider);
 
   // Independent monotonic ids: the anime and manga loads run concurrently, and
   // each must only discard *its own* superseded responses.

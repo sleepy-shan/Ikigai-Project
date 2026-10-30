@@ -132,9 +132,22 @@ class BrowseQuery {
 /// burning AniList's 90 req/min budget when revisiting rails, retyping a
 /// search, or navigating back to a detail page.
 class MediaRepository {
-  MediaRepository(this._client, {this.cacheTtl = const Duration(minutes: 5)});
+  MediaRepository(
+    this._client, {
+    this.cacheTtl = const Duration(minutes: 5),
+    this.transport,
+  });
 
   final AniListClient _client;
+
+  /// When set, every request goes through it (the GraphQL client) instead of
+  /// the hand-written [AniListClient]. The in-memory cache and in-flight
+  /// sharing below still apply on top.
+  final Future<Map<String, dynamic>> Function(
+    String document,
+    Map<String, dynamic> variables, {
+    String? token,
+  })? transport;
   final Duration cacheTtl;
   final Map<String, _CacheEntry<dynamic>> _cache = {};
 
@@ -195,7 +208,10 @@ class MediaRepository {
   }) {
     final pending = _inflight[key];
     if (pending != null) return pending;
-    final request = _client.query(document, variables, token: token);
+    final send = transport;
+    final request = send != null
+        ? send(document, variables, token: token)
+        : _client.query(document, variables, token: token);
     _inflight[key] = request;
     return request.whenComplete(() {
       if (identical(_inflight[key], request)) _inflight.remove(key);
@@ -558,13 +574,14 @@ class MediaRepository {
     required int userId,
     required String token,
     String? status,
+    MediaType type = MediaType.anime,
   }) async {
-    final key = 'accountList:$userId:${status ?? 'ALL'}';
+    final key = 'accountList:$userId:${type.name}:${status ?? 'ALL'}';
     final cached = _get<List<AccountListEntry>>(key);
     if (cached != null) return cached;
     final data = await _request(key, kMediaListCollectionQuery, {
       'userId': userId,
-      'type': MediaType.anime.anilistValue,
+      'type': type.anilistValue,
       'status': ?status,
     }, token: token);
     final result = AniListMapper.accountListEntries(data['MediaListCollection']);

@@ -131,7 +131,7 @@ class RevealOnScroll extends StatefulWidget {
 
   /// Keys already revealed (insertion ordered, bounded).
   static final Set<Object> _seen = <Object>{};
-  static const int _maxSeen = 800;
+  static const int _maxSeen = 4000;
 
   static void _remember(Object? key) {
     if (key == null) return;
@@ -152,9 +152,13 @@ class _RevealOnScrollState extends State<RevealOnScroll> {
   void initState() {
     super.initState();
     final key = widget.revealKey;
-    // Already seen: show immediately, no fade, no timer.
-    if (key != null && RevealOnScroll._seen.contains(key)) {
+    // Already seen, or arriving while the page is scrolling: show at once.
+    // Fading in every tile of a fast scroll is dozens of opacity layers per
+    // frame; the entrance is only worth it for a still page.
+    if ((key != null && RevealOnScroll._seen.contains(key)) ||
+        ScrollBusy.isScrolling) {
       _visible = true;
+      RevealOnScroll._remember(key);
       return;
     }
     // Stagger start so items cascade in. Capped at 8 steps to bound
@@ -228,8 +232,14 @@ class _HoverLiftState extends State<HoverLift> {
     final scheme = Theme.of(context).colorScheme;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovering = true),
-      onExit: (_) => setState(() => _hovering = false),
+      // Cards sliding under a stationary pointer while scrolling must not each
+      // run a lift / scale / glow animation.
+      onEnter: (_) {
+        if (!ScrollBusy.isScrolling) setState(() => _hovering = true);
+      },
+      onExit: (_) {
+        if (_hovering) setState(() => _hovering = false);
+      },
       child: AnimatedScale(
         scale: _hovering ? widget.scale : 1.0,
         duration: const Duration(milliseconds: 220),

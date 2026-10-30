@@ -108,12 +108,22 @@ enum MediaSort {
   favourites('FAVOURITES_DESC', 'Favorites'),
   startDate('START_DATE_DESC', 'Newest'),
   updated('UPDATED_AT_DESC', 'Recently updated'),
-  titleRomaji('TITLE_ROMAJI', 'A → Z');
+  titleRomaji('TITLE_ROMAJI', 'A → Z'),
+
+  /// Relevance to the search text. Only meaningful together with a search
+  /// term, so it is left out of [browseOptions].
+  searchMatch('SEARCH_MATCH', 'Best match');
 
   const MediaSort(this.wire, this.label);
 
   final String wire;
   final String label;
+
+  /// Sorts that make sense without a search term (browse pages, filters).
+  static final List<MediaSort> browseOptions = [
+    for (final s in values)
+      if (s != searchMatch) s,
+  ];
 }
 
 /// Original material a title is adapted from (AniList `MediaSource`).

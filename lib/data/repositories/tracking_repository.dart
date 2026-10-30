@@ -52,6 +52,11 @@ abstract interface class TrackingRepository {
 
   /// The user's entry for [mediaId], or null when untracked.
   Future<MediaEntry?> entryFor(int mediaId);
+
+  /// Adds [incoming] entries that are not tracked yet (matched by id and
+  /// type) in ONE write. Existing entries are never touched, so local edits
+  /// win over an import. Returns how many entries were added.
+  Future<int> importEntries(List<MediaEntry> incoming);
 }
 
 /// Storage-backed tracking store.
@@ -205,6 +210,22 @@ class LocalTrackingRepository implements TrackingRepository {
 
   @override
   Future<void> clear() => _writeAll(const []);
+
+  @override
+  Future<int> importEntries(List<MediaEntry> incoming) async {
+    if (incoming.isEmpty) return 0;
+    final entries = _readAll();
+    final known = {for (final e in entries) '${e.type.name}:${e.mediaId}'};
+    var added = 0;
+    for (final entry in incoming) {
+      if (known.add('${entry.type.name}:${entry.mediaId}')) {
+        entries.add(entry);
+        added++;
+      }
+    }
+    if (added > 0) await _writeAll(entries);
+    return added;
+  }
 
   @override
   Future<MediaEntry?> entryFor(int mediaId) async {

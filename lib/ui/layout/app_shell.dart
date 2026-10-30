@@ -6,7 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/theme/design_tokens.dart';
+import '../../core/utils/app_exception.dart';
 import '../../state/settings_controller.dart';
+import '../../state/tracked_entries_notifier.dart' show entrySyncErrorProvider;
 import '../components/account_button.dart';
 import '../components/app_logo.dart';
 import '../components/search_field.dart';
@@ -85,7 +87,25 @@ class AppShell extends ConsumerWidget {
     final isCompact = width < Tokens.breakpointMedium;
     final location = GoRouterState.of(context).uri.path;
     final activePath = _activePath(location);
+    // The search page has its own search bars, so the app bar's field
+    // (desktop) and search button (phones) step aside while it is open.
+    final onSearchPage = location == Routes.search;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // Background AniList sync failures (progress, status, score, delete) have
+    // no screen of their own, so surface them once as a snackbar. The local
+    // list is already updated; this only says AniList did not get the change.
+    ref.listen<AppException?>(entrySyncErrorProvider, (previous, next) {
+      if (next == null) return;
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Text("Couldn't sync with AniList: ${next.userMessage}"),
+            backgroundColor: Tokens.danger,
+          ),
+        );
+    });
 
     // Command-palette shortcut: "/" or Ctrl/Cmd+K jumps to search from
     // anywhere — unless the user is already typing in a text field (then
@@ -97,7 +117,7 @@ class AppShell extends ConsumerWidget {
     }
 
     void goSearch() {
-      if (isTyping()) return;
+      if (isTyping() || onSearchPage) return;
       context.push(Routes.search);
     }
 
@@ -124,6 +144,7 @@ class AppShell extends ConsumerWidget {
               children: [
                 _TopBar(
                   isCompact: isCompact,
+                  showSearch: !onSearchPage,
                   onLogoTap: () => context.go(Routes.home),
                 ),
                 Expanded(
@@ -271,10 +292,17 @@ class _PageFadeState extends State<_PageFade>
 ///
 /// - Wide screens (>= 600px) show the search field in the middle.
 /// - Narrower screens show a search icon that opens the search page.
+/// - While the search page itself is open ([showSearch] false) neither is
+///   shown: that page has its own search bars.
 class _TopBar extends StatelessWidget {
-  const _TopBar({required this.isCompact, required this.onLogoTap});
+  const _TopBar({
+    required this.isCompact,
+    required this.onLogoTap,
+    this.showSearch = true,
+  });
 
   final bool isCompact;
+  final bool showSearch;
   final VoidCallback onLogoTap;
 
   @override
@@ -313,7 +341,9 @@ class _TopBar extends StatelessWidget {
                 wordmarkScale: 0.95,
                 onTap: onLogoTap,
               ),
-              if (showSearchField)
+              if (!showSearch)
+                const Spacer()
+              else if (showSearchField)
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(

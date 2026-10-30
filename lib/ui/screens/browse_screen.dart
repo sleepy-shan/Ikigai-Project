@@ -692,7 +692,7 @@ class _SortMenu extends ConsumerWidget {
         borderRadius: BorderRadius.circular(Tokens.radiusLg - 2),
       ),
       itemBuilder: (context) => [
-        for (final value in MediaSort.values)
+        for (final value in MediaSort.browseOptions)
           CheckedPopupMenuItem<MediaSort>(
             value: value,
             checked: value == sort,

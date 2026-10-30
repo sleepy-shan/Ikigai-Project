@@ -310,29 +310,66 @@ class MediaRailList extends StatelessWidget {
 /// work, and overscroll/glow behave as a single surface.
 ///
 /// [columnsForWidth] lets tests override the responsive breakpoints.
-class SliverPosterGrid extends StatelessWidget {
+class SliverPosterGrid extends StatefulWidget {
   const SliverPosterGrid({
     required this.items,
     this.hasMore = false,
+    this.compact = false,
     this.columnsForWidth = posterColumns,
     super.key,
   });
 
   final List<Media> items;
   final bool hasMore;
+
+  /// Denser grid of smaller cards (same metrics as the browse pages).
+  final bool compact;
   final int Function(double width) columnsForWidth;
 
   @override
+  State<SliverPosterGrid> createState() => _SliverPosterGridState();
+}
+
+class _SliverPosterGridState extends State<SliverPosterGrid> {
+  // A SliverLayoutBuilder runs its builder on every scroll frame (the sliver
+  // constraints carry the scroll offset). Returning a freshly built grid each
+  // time makes Flutter rebuild every visible tile on every frame, which is
+  // what makes long grids lag. The grid only depends on the cross-axis
+  // width and this widget's inputs, so it is built once per (width, inputs)
+  // and the identical widget is handed back on every other frame.
+  Widget? _cached;
+  double _cachedWidth = -1;
+
+  @override
+  void didUpdateWidget(covariant SliverPosterGrid oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _cached = null;
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final items = widget.items;
+    final hasMore = widget.hasMore;
+    final compact = widget.compact;
     return SliverLayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.crossAxisExtent;
-        final columns = columnsForWidth(width);
-        final columnGap = posterColumnGap(width);
+        final cached = _cached;
+        if (cached != null && _cachedWidth == width) return cached;
+        final columns =
+            compact ? browsePosterColumns(width) : widget.columnsForWidth(width);
+        final columnGap =
+            compact ? browseColumnGap(width) : posterColumnGap(width);
+        final rowGap = compact ? kBrowseRowGap : posterRowGap(width);
+        final textHeight = compact ? kBrowseTextHeight : kPosterTextHeight;
         final tileWidth =
             (width - (columns - 1) * columnGap - Tokens.space32) / columns;
-        final tileHeight = tileWidth / Tokens.posterAspect + kPosterTextHeight;
-        return SliverPadding(
+        final tileHeight = tileWidth / Tokens.posterAspect + textHeight;
+        final indexById = <String, int>{
+          for (var i = 0; i < items.length; i++)
+            '${items[i].type.name}:${items[i].id}': i,
+        };
+        final grid = SliverPadding(
           padding: const EdgeInsets.only(
             left: Tokens.space16,
             right: Tokens.space16,
@@ -341,7 +378,7 @@ class SliverPosterGrid extends StatelessWidget {
           sliver: SliverGrid.builder(
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: columns,
-              mainAxisSpacing: posterRowGap(width),
+              mainAxisSpacing: rowGap,
               crossAxisSpacing: columnGap,
               childAspectRatio: tileWidth / tileHeight,
             ),
@@ -350,6 +387,13 @@ class SliverPosterGrid extends StatelessWidget {
             addAutomaticKeepAlives: false,
             addRepaintBoundaries: true,
             itemCount: items.length + (hasMore ? 1 : 0),
+            // Stable identity: appended pages (infinite scroll) and replaced
+            // result sets reuse existing tiles instead of rebuilding them.
+            findChildIndexCallback: (key) {
+              if (key is! ValueKey<String>) return null;
+              final i = indexById[key.value];
+              return i;
+            },
             itemBuilder: (context, index) {
               if (index >= items.length) {
                 return const Center(
@@ -362,13 +406,17 @@ class SliverPosterGrid extends StatelessWidget {
               }
               final media = items[index];
               return RevealOnScroll(
+                key: ValueKey('${media.type.name}:${media.id}'),
                 index: index,
                 revealKey: 'poster:${media.type.name}:${media.id}',
-                child: PosterCard(media: media),
+                child: PosterCard(media: media, compact: compact),
               );
             },
           ),
         );
+        _cachedWidth = width;
+        _cached = grid;
+        return grid;
       },
     );
   }

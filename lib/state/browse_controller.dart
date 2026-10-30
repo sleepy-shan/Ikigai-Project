@@ -6,7 +6,7 @@ import '../core/utils/app_exception.dart';
 import '../data/models/media.dart';
 import '../data/repositories/media_repository.dart';
 import 'load_state.dart';
-import 'media_providers.dart';
+import 'gql_catalog.dart';
 
 /// A named browse lineup reachable from the home "View all" buttons
 /// (`/anime?rail=trending`). Mirrors the sort/status of the matching home rail
@@ -151,7 +151,7 @@ class BrowseController extends Notifier<BrowseState> {
 
   final MediaType mediaType;
   int _requestId = 0;
-  MediaRepository get _repo => ref.read(mediaRepositoryProvider);
+  GqlCatalog get _repo => ref.read(gqlCatalogProvider);
 
   @override
   BrowseState build() {
