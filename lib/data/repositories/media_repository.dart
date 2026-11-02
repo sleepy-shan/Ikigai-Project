@@ -18,10 +18,13 @@ class BrowseQuery {
     this.sort = MediaSort.trending,
     this.search = '',
     this.genre,
+    this.genres = const [],
     this.status,
     this.format,
     this.season,
     this.seasonYear,
+    this.yearFrom,
+    this.yearTo,
     this.source,
     this.countryOfOrigin,
     this.minScore,
@@ -34,10 +37,18 @@ class BrowseQuery {
   final MediaSort sort;
   final String search;
   final String? genre;
+
+  /// Several genres at once (AniList `genre_in`, applied together by
+  /// AniList). Used by the Search filters; the Browse pages use [genre].
+  final List<String> genres;
   final MediaStatus? status;
   final MediaFormat? format;
   final MediaSeason? season;
   final int? seasonYear;
+
+  /// Inclusive start-year range (AniList `startDate_greater/lesser`).
+  final int? yearFrom;
+  final int? yearTo;
 
   /// Adaptation source (Manga, Original, Light Novel, ...).
   final MediaSource? source;
@@ -58,10 +69,13 @@ class BrowseQuery {
   bool get hasFilters =>
       search.trim().isNotEmpty ||
       (genre != null && genre!.isNotEmpty) ||
+      genres.isNotEmpty ||
       status != null ||
       format != null ||
       season != null ||
       seasonYear != null ||
+      yearFrom != null ||
+      yearTo != null ||
       source != null ||
       countryOfOrigin != null ||
       minScore != null ||
@@ -71,10 +85,12 @@ class BrowseQuery {
   int get activeFilterCount =>
       [
         genre != null && genre!.isNotEmpty,
+        genres.isNotEmpty,
         status != null,
         format != null,
         season != null,
         seasonYear != null,
+        yearFrom != null || yearTo != null,
         source != null,
         countryOfOrigin != null,
         minScore != null,
@@ -90,6 +106,9 @@ class BrowseQuery {
     MediaFormat? format,
     MediaSeason? season,
     int? seasonYear,
+    List<String>? genres,
+    Object? yearFrom = _unset,
+    Object? yearTo = _unset,
     Object? source = _unset,
     Object? countryOfOrigin = _unset,
     Object? minScore = _unset,
@@ -108,6 +127,9 @@ class BrowseQuery {
       format: clearFilters ? format : (format ?? this.format),
       season: clearFilters ? season : (season ?? this.season),
       seasonYear: clearFilters ? seasonYear : (seasonYear ?? this.seasonYear),
+      genres: genres ?? this.genres,
+      yearFrom: identical(yearFrom, _unset) ? this.yearFrom : yearFrom as int?,
+      yearTo: identical(yearTo, _unset) ? this.yearTo : yearTo as int?,
       // Newer filters: passing null clears them; omitting keeps them (so the
       // older setters that use clearFilters don't wipe them by accident).
       source: identical(source, _unset) ? this.source : source as MediaSource?,
@@ -256,6 +278,10 @@ class MediaRepository {
       'sort': [query.sort.wire],
       if (query.search.trim().isNotEmpty) 'search': query.search.trim(),
       if (query.genre != null && query.genre!.isNotEmpty) 'genre': query.genre,
+      if (query.genres.isNotEmpty) 'genre_in': query.genres,
+      if (query.yearFrom != null)
+        'startDate_greater': query.yearFrom! * 10000 - 1,
+      if (query.yearTo != null) 'startDate_lesser': (query.yearTo! + 1) * 10000,
       if (query.status != null) 'status': query.status!.wire,
       if (query.format != null && query.format != MediaFormat.unknown)
         'format': query.format!.wire,
@@ -408,7 +434,8 @@ class MediaRepository {
 
   String _browseKey(BrowseQuery q) =>
       'browse:${q.type.name}:${q.sort.name}:${q.search.trim().toLowerCase()}'
-      ':${q.genre ?? ''}:${q.status?.name ?? ''}:${q.format?.name ?? ''}'
+      ':${q.genre ?? ''}:${q.genres.join('|')}:${q.status?.name ?? ''}'
+      ':${q.format?.name ?? ''}:${q.yearFrom ?? 0}:${q.yearTo ?? 0}'
       ':${q.season?.name ?? ''}:${q.seasonYear ?? 0}'
       ':${q.source?.name ?? ''}:${q.countryOfOrigin ?? ''}:${q.minScore ?? 0}'
       ':${q.isAdult ? 1 : 0}:${q.page}:${q.perPage}';
@@ -433,6 +460,7 @@ class MediaRepository {
     final pageJson = _pageMap(data['Page']);
     final info = AniListMapper.pageInfo(pageJson, page);
     final result = CharacterPage(
+      total: info.total,
       items: AniListMapper.characters(pageJson['characters']),
       page: info.page,
       hasNextPage: info.hasNextPage,
@@ -459,6 +487,7 @@ class MediaRepository {
     final pageJson = _pageMap(data['Page']);
     final info = AniListMapper.pageInfo(pageJson, page);
     final result = StaffPage(
+      total: info.total,
       items: AniListMapper.staff(pageJson['staff']),
       page: info.page,
       hasNextPage: info.hasNextPage,
@@ -485,6 +514,7 @@ class MediaRepository {
     final pageJson = _pageMap(data['Page']);
     final info = AniListMapper.pageInfo(pageJson, page);
     final result = StudioPage(
+      total: info.total,
       items: AniListMapper.studios(pageJson['studios']),
       page: info.page,
       hasNextPage: info.hasNextPage,

@@ -68,3 +68,12 @@ EdgeInsets responsiveGutter(BuildContext context) => EdgeInsets.symmetric(
         _ => Tokens.space24,
       },
     );
+
+/// How much the reader's text-size setting enlarges text (1.0 = default).
+///
+/// Grids and lists with a fixed row height multiply the text part of that
+/// height by this, so large system fonts don't overflow the tiles.
+double textScaleOf(BuildContext context) =>
+    (MediaQuery.textScalerOf(context).scale(14) / 14)
+        .clamp(1.0, 2.5)
+        .toDouble();

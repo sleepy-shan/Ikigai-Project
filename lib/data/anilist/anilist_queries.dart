@@ -80,14 +80,17 @@ query (
   \$search: String, \$genre: String, \$status: MediaStatus,
   \$format: MediaFormat, \$season: MediaSeason, \$seasonYear: Int,
   \$source: MediaSource, \$countryOfOrigin: CountryCode, \$minScore: Int,
-  \$isAdult: Boolean = false
+  \$genre_in: [String], \$startDate_greater: FuzzyDateInt,
+  \$startDate_lesser: FuzzyDateInt, \$isAdult: Boolean = false
 ) {
   Page(page: \$page, perPage: \$perPage) {
     pageInfo { currentPage hasNextPage total }
     media(
       type: \$type, isAdult: \$isAdult, sort: \$sort, search: \$search,
-      genre: \$genre, status: \$status, format: \$format, season: \$season,
-      seasonYear: \$seasonYear, source: \$source,
+      genre: \$genre, genre_in: \$genre_in, status: \$status,
+      format: \$format, season: \$season, seasonYear: \$seasonYear,
+      startDate_greater: \$startDate_greater,
+      startDate_lesser: \$startDate_lesser, source: \$source,
       countryOfOrigin: \$countryOfOrigin, averageScore_greater: \$minScore
     ) { ${detail ? kMediaDetailSelection : kMediaListSelection} }
   }
@@ -177,12 +180,15 @@ query (\$page: Int, \$perPage: Int, \$startDate_greater: FuzzyDateInt, \$startDa
 const String kCharacterSearchQuery = '''
 query (\$page: Int, \$perPage: Int, \$search: String) {
   Page(page: \$page, perPage: \$perPage) {
-    pageInfo { currentPage hasNextPage }
+    pageInfo { currentPage hasNextPage total }
     characters(search: \$search, sort: FAVOURITES_DESC) {
       id
       name { full native }
       image { large }
       favourites
+      media(perPage: 1, sort: POPULARITY_DESC) {
+        nodes { title { romaji english } }
+      }
     }
   }
 }''';
@@ -191,13 +197,15 @@ query (\$page: Int, \$perPage: Int, \$search: String) {
 const String kStaffSearchQuery = '''
 query (\$page: Int, \$perPage: Int, \$search: String) {
   Page(page: \$page, perPage: \$perPage) {
-    pageInfo { currentPage hasNextPage }
+    pageInfo { currentPage hasNextPage total }
     staff(search: \$search, sort: FAVOURITES_DESC) {
       id
       name { full native }
       image { large }
       favourites
       primaryOccupations
+      staffMedia(perPage: 1) { pageInfo { total } }
+      characterMedia(perPage: 1) { pageInfo { total } }
     }
   }
 }''';
@@ -206,12 +214,13 @@ query (\$page: Int, \$perPage: Int, \$search: String) {
 const String kStudioSearchQuery = '''
 query (\$page: Int, \$perPage: Int, \$search: String) {
   Page(page: \$page, perPage: \$perPage) {
-    pageInfo { currentPage hasNextPage }
+    pageInfo { currentPage hasNextPage total }
     studios(search: \$search, sort: FAVOURITES_DESC) {
       id
       name
       favourites
       isAnimationStudio
+      media(perPage: 1) { pageInfo { total } }
     }
   }
 }''';

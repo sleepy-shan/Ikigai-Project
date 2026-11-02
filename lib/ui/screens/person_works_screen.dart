@@ -333,13 +333,17 @@ class _PageNav extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Text(
-            '$label · Page $page',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+          Expanded(
+            child: Text(
+              '$label · Page $page',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
           ),
-          const Spacer(),
+          const SizedBox(width: Tokens.space8),
           IconButton.outlined(
             tooltip: 'Previous page',
             visualDensity: VisualDensity.compact,

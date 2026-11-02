@@ -127,12 +127,15 @@ class AppShell extends ConsumerWidget {
       context.push(Routes.search);
     }
 
-    // Fade the new page in. Not an AnimatedSwitcher: that keeps the old page
-    // mounted next to the new one, and both contain the shell's navigator,
-    // which owns a GlobalKey — a "Duplicate GlobalKey" error.
-    final content = ClipRect(
-      child: _PageFade(key: ValueKey(location), child: child),
-    );
+    // Fade the new page in. Not an AnimatedSwitcher (it would keep the old
+    // page mounted next to the new one, and both contain the shell's
+    // navigator, which owns a GlobalKey) and not a ValueKey(location) either:
+    // changing that key re-parents the navigator's whole subtree through its
+    // GlobalKey on every navigation, which trips the framework's
+    // "_lifecycleState == _ElementLifecycle.inactive" assertion when the page
+    // contains layout-time builders (SliverLayoutBuilder grids). The wrapper
+    // stays mounted and simply replays its fade when the location changes.
+    final content = _PageFade(location: location, child: child);
 
     return CallbackShortcuts(
       bindings: {
@@ -153,38 +156,49 @@ class AppShell extends ConsumerWidget {
                   onLogoTap: () => context.go(Routes.home),
                 ),
                 Expanded(
-                  child: isCompact
-                      ? content
-                      : LayoutBuilder(
-                          builder: (context, constraints) {
-                            // The page is laid out once, at the width it will
-                            // have when the sidebar settles, and then simply
-                            // slides along with the sidebar edge. Re-flowing a
-                            // whole page (grids, rails, sliver headers) on
-                            // every frame of the width animation was the lag.
-                            final settledWidth =
-                                constraints.maxWidth -
-                                (sidebarCollapsed
-                                    ? _sidebarCollapsedWidth
-                                    : _sidebarExpandedWidth);
-                            return Row(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                _Sidebar(activePath: activePath),
-                                Expanded(
-                                  child: ClipRect(
-                                    child: OverflowBox(
-                                      alignment: Alignment.topLeft,
-                                      minWidth: settledWidth,
-                                      maxWidth: settledWidth,
-                                      child: RepaintBoundary(child: content),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
-                        ),
+                  // One structure for every width. Switching between two
+                  // different parent chains (phone vs. sidebar layout) used
+                  // to move the shell's navigator across the 1000px
+                  // breakpoint; with the page in a keyed slot it keeps its
+                  // elements and only the sidebar comes and goes.
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      // The page is laid out once, at the width it will have
+                      // when the sidebar settles, and then simply slides
+                      // along with the sidebar edge. Re-flowing a whole page
+                      // (grids, rails, sliver headers) on every frame of the
+                      // width animation was the lag.
+                      final sidebarWidth = isCompact
+                          ? 0.0
+                          : (sidebarCollapsed
+                                ? _sidebarCollapsedWidth
+                                : _sidebarExpandedWidth);
+                      final settledWidth = (constraints.maxWidth - sidebarWidth)
+                          .clamp(0.0, double.infinity)
+                          .toDouble();
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (!isCompact)
+                            _Sidebar(
+                              key: const ValueKey('shell-sidebar'),
+                              activePath: activePath,
+                            ),
+                          Expanded(
+                            key: const ValueKey('shell-page'),
+                            child: ClipRect(
+                              child: OverflowBox(
+                                alignment: Alignment.topLeft,
+                                minWidth: settledWidth,
+                                maxWidth: settledWidth,
+                                child: RepaintBoundary(child: content),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
                 ),
               ],
             ),
@@ -273,10 +287,14 @@ class _AuroraBackground extends StatelessWidget {
   }
 }
 
-/// Fades and nudges a page into place when it first appears.
+/// Fades and nudges a page into place whenever [location] changes.
+///
+/// Stays mounted for the life of the shell (see the note in [AppShell]); the
+/// animation is replayed instead of the widget being recreated.
 class _PageFade extends StatefulWidget {
-  const _PageFade({required this.child, super.key});
+  const _PageFade({required this.location, required this.child});
 
+  final String location;
   final Widget child;
 
   @override
@@ -301,8 +319,19 @@ class _PageFadeState extends State<_PageFade>
   @override
   void initState() {
     super.initState();
-    // Start after the new page's heavy first build/layout frame, so that
-    // frame doesn't eat the beginning of the animation (visible as a hitch).
+    _play();
+  }
+
+  @override
+  void didUpdateWidget(covariant _PageFade oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.location != widget.location) _play();
+  }
+
+  /// Start after the new page's heavy first build/layout frame, so that
+  /// frame doesn't eat the beginning of the animation (visible as a hitch).
+  void _play() {
+    _controller.value = 0;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _controller.forward();
     });
@@ -481,7 +510,7 @@ const double _sidebarLabelWidth = 150;
 /// the label fade. The rows are built once and only the width wrapper and the
 /// label opacity update per frame.
 class _Sidebar extends ConsumerStatefulWidget {
-  const _Sidebar({required this.activePath});
+  const _Sidebar({required this.activePath, super.key});
 
   final String? activePath;
 

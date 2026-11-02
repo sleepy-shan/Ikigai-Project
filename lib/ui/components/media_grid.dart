@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_motion.dart';
 import '../../core/theme/app_scroll.dart';
 import '../../core/theme/design_tokens.dart';
+import '../../core/theme/responsive.dart';
 import '../../data/models/media.dart';
 import '../../data/models/media_entry.dart';
 import 'poster_card.dart';
@@ -29,7 +30,8 @@ class MediaEntryGrid extends StatelessWidget {
                 (columns - 1) * columnGap -
                 Tokens.space32) /
             columns;
-        final tileHeight = tileWidth / Tokens.posterAspect + 92;
+        final tileHeight =
+            tileWidth / Tokens.posterAspect + 92 * textScaleOf(context);
 
         return GridView.builder(
           physics: const SmoothScrollPhysics(),
@@ -214,7 +216,8 @@ class _MediaGridState extends State<MediaGrid> {
                 (columns - 1) * columnGap -
                 Tokens.space32) /
             columns;
-        final tileHeight = tileWidth / Tokens.posterAspect + kPosterTextHeight;
+        final tileHeight = tileWidth / Tokens.posterAspect +
+            kPosterTextHeight * textScaleOf(context);
 
         return Stack(
           children: [
@@ -339,6 +342,7 @@ class _SliverPosterGridState extends State<SliverPosterGrid> {
   // and the identical widget is handed back on every other frame.
   Widget? _cached;
   double _cachedWidth = -1;
+  double _cachedScale = -1;
 
   @override
   void didUpdateWidget(covariant SliverPosterGrid oldWidget) {
@@ -351,17 +355,23 @@ class _SliverPosterGridState extends State<SliverPosterGrid> {
     final items = widget.items;
     final hasMore = widget.hasMore;
     final compact = widget.compact;
+    final textScale = textScaleOf(context);
     return SliverLayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.crossAxisExtent;
         final cached = _cached;
-        if (cached != null && _cachedWidth == width) return cached;
+        if (cached != null &&
+            _cachedWidth == width &&
+            _cachedScale == textScale) {
+          return cached;
+        }
         final columns =
             compact ? browsePosterColumns(width) : widget.columnsForWidth(width);
         final columnGap =
             compact ? browseColumnGap(width) : posterColumnGap(width);
         final rowGap = compact ? kBrowseRowGap : posterRowGap(width);
-        final textHeight = compact ? kBrowseTextHeight : kPosterTextHeight;
+        final textHeight =
+            (compact ? kBrowseTextHeight : kPosterTextHeight) * textScale;
         final tileWidth =
             (width - (columns - 1) * columnGap - Tokens.space32) / columns;
         final tileHeight = tileWidth / Tokens.posterAspect + textHeight;
@@ -415,6 +425,7 @@ class _SliverPosterGridState extends State<SliverPosterGrid> {
           ),
         );
         _cachedWidth = width;
+        _cachedScale = textScale;
         _cached = grid;
         return grid;
       },
