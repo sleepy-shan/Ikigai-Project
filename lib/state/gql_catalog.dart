@@ -165,6 +165,10 @@ class GqlCatalog {
       'sort': [query.sort.wire],
       if (query.search.trim().isNotEmpty) 'search': query.search.trim(),
       if (query.genre != null && query.genre!.isNotEmpty) 'genre': query.genre,
+      if (query.genres.isNotEmpty) 'genre_in': query.genres,
+      if (query.yearFrom != null)
+        'startDate_greater': query.yearFrom! * 10000 - 1,
+      if (query.yearTo != null) 'startDate_lesser': (query.yearTo! + 1) * 10000,
       if (query.status != null) 'status': query.status!.wire,
       if (query.format != null && query.format != MediaFormat.unknown)
         'format': query.format!.wire,

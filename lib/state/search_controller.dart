@@ -9,6 +9,7 @@ import '../data/repositories/media_repository.dart';
 import 'load_state.dart';
 import 'gql_catalog.dart';
 import 'media_providers.dart';
+import 'search_filters.dart';
 
 /// Search tabs: Anime, Manga, Studios, Staff, Characters.
 enum SearchTab { anime, manga, studios, staff, characters }
@@ -25,6 +26,7 @@ class TabPage<T> {
     this.page = 1,
     this.hasNextPage = false,
     this.isAppending = false,
+    this.total,
     this.errorMessage,
   });
 
@@ -33,6 +35,9 @@ class TabPage<T> {
   final int page;
   final bool hasNextPage;
   final bool isAppending;
+
+  /// Total matches reported by the API for the current search, if known.
+  final int? total;
   final String? errorMessage;
 
   TabPage<T> copyWith({
@@ -41,6 +46,7 @@ class TabPage<T> {
     int? page,
     bool? hasNextPage,
     bool? isAppending,
+    int? total,
     String? errorMessage,
   }) {
     return TabPage<T>(
@@ -49,6 +55,7 @@ class TabPage<T> {
       page: page ?? this.page,
       hasNextPage: hasNextPage ?? this.hasNextPage,
       isAppending: isAppending ?? this.isAppending,
+      total: total ?? this.total,
       errorMessage: errorMessage,
     );
   }
@@ -60,6 +67,8 @@ class SearchState {
     this.tab = SearchTab.anime,
     this.animeSort,
     this.mangaSort,
+    this.animeFilters = SearchFilters.none,
+    this.mangaFilters = SearchFilters.none,
     this.anime = const TabPage<Media>(),
     this.manga = const TabPage<Media>(),
     this.studios = const TabPage<SearchStudio>(),
@@ -76,6 +85,12 @@ class SearchState {
   /// automatic (popularity with no text, best match once they type).
   final MediaSort? animeSort;
   final MediaSort? mangaSort;
+
+  /// Filters & Criteria applied to the Anime tab.
+  final SearchFilters animeFilters;
+
+  /// Filters & Criteria applied to the Manga tab.
+  final SearchFilters mangaFilters;
   final TabPage<Media> anime;
   final TabPage<Media> manga;
   final TabPage<SearchStudio> studios;
@@ -83,6 +98,17 @@ class SearchState {
   final TabPage<SearchCharacter> characters;
 
   String queryOf(SearchTab tab) => queries[tab] ?? '';
+
+  /// Filters of the Anime / Manga tabs (none for the other tabs).
+  SearchFilters filtersOf(SearchTab tab) => switch (tab) {
+        SearchTab.anime => animeFilters,
+        SearchTab.manga => mangaFilters,
+        _ => SearchFilters.none,
+      };
+
+  /// Result page of the Anime or Manga tab.
+  TabPage<Media> mediaPageOf(SearchTab tab) =>
+      tab == SearchTab.manga ? manga : anime;
 
   /// Search text of the active tab.
   String get query => queryOf(tab);
@@ -113,6 +139,8 @@ class SearchState {
     bool resetAnimeSort = false,
     MediaSort? mangaSort,
     bool resetMangaSort = false,
+    SearchFilters? animeFilters,
+    SearchFilters? mangaFilters,
     TabPage<Media>? anime,
     TabPage<Media>? manga,
     TabPage<SearchStudio>? studios,
@@ -124,6 +152,8 @@ class SearchState {
       tab: tab ?? this.tab,
       animeSort: resetAnimeSort ? null : (animeSort ?? this.animeSort),
       mangaSort: resetMangaSort ? null : (mangaSort ?? this.mangaSort),
+      animeFilters: animeFilters ?? this.animeFilters,
+      mangaFilters: mangaFilters ?? this.mangaFilters,
       anime: anime ?? this.anime,
       manga: manga ?? this.manga,
       studios: studios ?? this.studios,
@@ -155,7 +185,8 @@ class SearchController extends Notifier<SearchState> {
 
   /// What each tab's current result set was requested with. Further pages
   /// are always fetched with these, never with text typed since.
-  final Map<SearchTab, ({String query, MediaSort sort})> _params = {};
+  final Map<SearchTab, ({String query, MediaSort sort, SearchFilters filters})>
+      _params = {};
 
   MediaRepository get _repo => ref.read(mediaRepositoryProvider);
   GqlCatalog get _catalog => ref.read(gqlCatalogProvider);
@@ -247,14 +278,51 @@ class SearchController extends Notifier<SearchState> {
     await _restart(SearchTab.manga);
   }
 
+  // -- filters (Anime and Manga tabs) -----------------------------------------
+
+  /// Applies the whole Filters & Criteria set of [tab] at once (one request).
+  Future<void> applyFilters(SearchTab tab, SearchFilters filters) async {
+    if (tab != SearchTab.anime && tab != SearchTab.manga) return;
+    if (state.filtersOf(tab) == filters) return;
+    state = tab == SearchTab.manga
+        ? state.copyWith(mangaFilters: filters)
+        : state.copyWith(animeFilters: filters);
+    await _restart(tab);
+  }
+
+  /// Clears one criterion of [tab] (the ✕ on an active-filter chip).
+  Future<void> removeFilter(SearchTab tab, SearchFilterKey key) =>
+      applyFilters(tab, state.filtersOf(tab).without(key));
+
+  /// How many titles [filters] would match together with [tab]'s current
+  /// search text, for the live count on the Apply button. Null when unknown.
+  Future<int?> previewCount(SearchTab tab, SearchFilters filters) async {
+    try {
+      final text = normalizeSearchText(state.queryOf(tab));
+      final page = await _catalog.browse(
+        filters.toQuery(
+          type: tab == SearchTab.manga ? MediaType.manga : MediaType.anime,
+          sort: text.isEmpty ? MediaSort.popularity : MediaSort.searchMatch,
+          search: text,
+          perPage: 1,
+        ),
+      );
+      return page.total;
+    } catch (_) {
+      return null;
+    }
+  }
+
   // -- loading --------------------------------------------------------------
 
-  ({String query, MediaSort sort}) _wanted(SearchTab tab) {
+  ({String query, MediaSort sort, SearchFilters filters}) _wanted(
+    SearchTab tab,
+  ) {
     final text = normalizeSearchText(state.queryOf(tab));
     final sort = (tab == SearchTab.anime || tab == SearchTab.manga)
         ? state.sortOf(tab)
         : MediaSort.popularity; // unused by the people tabs
-    return (query: text, sort: sort);
+    return (query: text, sort: sort, filters: state.filtersOf(tab));
   }
 
   LoadStatus _statusOf(SearchTab tab) => switch (tab) {
@@ -278,6 +346,7 @@ class SearchController extends Notifier<SearchState> {
         current != null &&
         current.query == wanted.query &&
         current.sort == wanted.sort &&
+        current.filters == wanted.filters &&
         status != LoadStatus.error &&
         status != LoadStatus.initial) {
       return;
@@ -375,7 +444,7 @@ class SearchController extends Notifier<SearchState> {
           idOf: (m) => m.id,
           load: (page) async {
             final r = await _catalog.browse(
-              BrowseQuery(
+              params.filters.toQuery(
                 type: isManga ? MediaType.manga : MediaType.anime,
                 sort: params.sort,
                 search: text,
@@ -383,7 +452,12 @@ class SearchController extends Notifier<SearchState> {
                 perPage: _mediaPerPage,
               ),
             );
-            return (items: r.items, page: r.page, hasNext: r.hasNextPage);
+            return (
+              items: r.items,
+              page: r.page,
+              hasNext: r.hasNextPage,
+              total: r.total,
+            );
           },
         );
       case SearchTab.studios:
@@ -399,7 +473,12 @@ class SearchController extends Notifier<SearchState> {
               page: page,
               perPage: _peoplePerPage,
             );
-            return (items: r.items, page: r.page, hasNext: r.hasNextPage);
+            return (
+              items: r.items,
+              page: r.page,
+              hasNext: r.hasNextPage,
+              total: r.total,
+            );
           },
         );
       case SearchTab.staff:
@@ -415,7 +494,12 @@ class SearchController extends Notifier<SearchState> {
               page: page,
               perPage: _peoplePerPage,
             );
-            return (items: r.items, page: r.page, hasNext: r.hasNextPage);
+            return (
+              items: r.items,
+              page: r.page,
+              hasNext: r.hasNextPage,
+              total: r.total,
+            );
           },
         );
       case SearchTab.characters:
@@ -431,7 +515,12 @@ class SearchController extends Notifier<SearchState> {
               page: page,
               perPage: _peoplePerPage,
             );
-            return (items: r.items, page: r.page, hasNext: r.hasNextPage);
+            return (
+              items: r.items,
+              page: r.page,
+              hasNext: r.hasNextPage,
+              total: r.total,
+            );
           },
         );
     }
@@ -443,9 +532,9 @@ class SearchController extends Notifier<SearchState> {
     required TabPage<T> Function() read,
     required void Function(TabPage<T>) write,
     required int Function(T) idOf,
-    required Future<({List<T> items, int page, bool hasNext})> Function(
-      int page,
-    ) load,
+    required Future<({List<T> items, int page, bool hasNext, int? total})>
+            Function(int page)
+        load,
   }) async {
     final id = _nextId(tab);
     final target = append ? read().page + 1 : read().page;
@@ -475,6 +564,7 @@ class SearchController extends Notifier<SearchState> {
           page: result.page,
           hasNextPage: result.hasNext,
           isAppending: false,
+          total: result.total,
           errorMessage: null,
         ),
       );

@@ -121,6 +121,8 @@ class _LensSearchFieldState extends State<LensSearchField> {
         final maxW = constraints.maxWidth;
         final hint = maxW >= 400 ? widget.hintLong : widget.hintShort;
         final showHint = widget.showKbdChip && _text.isEmpty && maxW >= 300;
+        // Very narrow fields give the text the room: smaller action buttons.
+        final tight = maxW < 220;
 
         return MouseRegion(
           onEnter: (_) => setState(() => _hovering = true),
@@ -192,8 +194,8 @@ class _LensSearchFieldState extends State<LensSearchField> {
                       tooltip: 'Clear',
                       visualDensity: VisualDensity.compact,
                       padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(
-                        minWidth: 32,
+                      constraints: BoxConstraints(
+                        minWidth: tight ? 28 : 32,
                         minHeight: 32,
                       ),
                       icon: Icon(
@@ -211,6 +213,10 @@ class _LensSearchFieldState extends State<LensSearchField> {
                   IconButton(
                     tooltip: 'Search',
                     visualDensity: VisualDensity.compact,
+                    padding: tight ? EdgeInsets.zero : const EdgeInsets.all(8),
+                    constraints: tight
+                        ? const BoxConstraints(minWidth: 36, minHeight: 36)
+                        : null,
                     icon: Icon(
                       Icons.search_rounded,
                       size: 19,

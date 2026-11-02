@@ -12,6 +12,7 @@ class SearchCharacter {
     this.nameNative,
     this.imageUrl = '',
     this.favourites = 0,
+    this.mediaTitle = '',
   });
 
   final int id;
@@ -19,6 +20,9 @@ class SearchCharacter {
   final String? nameNative;
   final String imageUrl;
   final int favourites;
+
+  /// Most popular title the character appears in (card subtitle).
+  final String mediaTitle;
 }
 
 class SearchStaff {
@@ -29,6 +33,7 @@ class SearchStaff {
     this.imageUrl = '',
     this.favourites = 0,
     this.role = '',
+    this.credits = 0,
   });
 
   final int id;
@@ -39,6 +44,9 @@ class SearchStaff {
 
   /// Primary occupation, e.g. "Voice Actor" or "Mangaka".
   final String role;
+
+  /// Number of credited titles (production + voice roles).
+  final int credits;
 }
 
 class SearchStudio {
@@ -47,12 +55,16 @@ class SearchStudio {
     required this.name,
     this.favourites = 0,
     this.isAnimationStudio = true,
+    this.titleCount = 0,
   });
 
   final int id;
   final String name;
   final int favourites;
   final bool isAnimationStudio;
+
+  /// Number of titles the studio produced.
+  final int titleCount;
 }
 
 /// A page of character results plus pagination info.
@@ -61,11 +73,15 @@ class CharacterPage {
     required this.items,
     required this.page,
     required this.hasNextPage,
+    this.total,
   });
 
   final List<SearchCharacter> items;
   final int page;
   final bool hasNextPage;
+
+  /// Total matches reported by the API, if known.
+  final int? total;
 
   static const CharacterPage empty = CharacterPage(
     items: [],
@@ -80,11 +96,15 @@ class StaffPage {
     required this.items,
     required this.page,
     required this.hasNextPage,
+    this.total,
   });
 
   final List<SearchStaff> items;
   final int page;
   final bool hasNextPage;
+
+  /// Total matches reported by the API, if known.
+  final int? total;
 
   static const StaffPage empty = StaffPage(
     items: [],
@@ -99,11 +119,15 @@ class StudioPage {
     required this.items,
     required this.page,
     required this.hasNextPage,
+    this.total,
   });
 
   final List<SearchStudio> items;
   final int page;
   final bool hasNextPage;
+
+  /// Total matches reported by the API, if known.
+  final int? total;
 
   static const StudioPage empty = StudioPage(
     items: [],

@@ -349,6 +349,11 @@ class _SpotlightCarousel extends ConsumerWidget {
 
   static const slideCount = 5;
   static const height = 340.0;
+
+  /// The banner's text block is bottom-anchored in a fixed-height slide, so
+  /// the slide grows with the reader's font size (up to 1.5x).
+  static double heightOf(BuildContext context) =>
+      height * textScaleOf(context).clamp(1.0, 1.5).toDouble();
   static const _autoAdvance = Duration(seconds: 6);
 
   @override
@@ -368,7 +373,7 @@ class _SpotlightCarousel extends ConsumerWidget {
         if (page.items.isEmpty) return const SizedBox.shrink();
         final slides = page.items.take(slideCount).toList();
         return FlutterCarousel.builder(
-          height: height,
+          height: heightOf(context),
           itemCount: slides.length,
           // Pages are tight-sized so the banner image fills its slot.
           itemAlignment: null,
@@ -410,7 +415,7 @@ class _CarouselLoading extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
       child: SkeletonShimmer(
         child: SkeletonBone(
-          height: _SpotlightCarousel.height,
+          height: _SpotlightCarousel.heightOf(context),
           radius: Tokens.radiusXl,
         ),
       ),
@@ -431,7 +436,7 @@ class _CarouselError extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(Tokens.radiusXl),
         child: Container(
-          height: _SpotlightCarousel.height,
+          height: _SpotlightCarousel.heightOf(context),
           color: Theme.of(context).disabledColor.withValues(alpha: 0.10),
           child: Center(
             child: TextButton.icon(
@@ -470,7 +475,7 @@ class _CarouselCard extends StatelessWidget {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(Tokens.radiusXl),
           child: SizedBox(
-            height: _SpotlightCarousel.height,
+            height: _SpotlightCarousel.heightOf(context),
             width: double.infinity,
             child: Stack(
               children: [

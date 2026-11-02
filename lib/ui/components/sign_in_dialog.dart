@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/config/app_config.dart';
 import '../../core/theme/design_tokens.dart';
+import '../../core/theme/responsive.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../state/providers.dart';
 
@@ -142,10 +143,14 @@ class _SignInDialogState extends ConsumerState<_SignInDialog> {
                                   children: [
                                     _AlBadge(),
                                     SizedBox(width: Tokens.space8),
-                                    Text(
-                                      'Continue with AniList',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w700,
+                                    Flexible(
+                                      child: Text(
+                                        'Continue with AniList',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
                                       ),
                                     ),
                                   ],
@@ -183,10 +188,15 @@ class _SignInDialogState extends ConsumerState<_SignInDialog> {
                             color: scheme.onSurfaceVariant,
                           ),
                           const SizedBox(width: Tokens.space4),
-                          Text(
-                            'Secure OAuth · We never see your password',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
+                          // Flexible: on a 320px phone this line is wider
+                          // than the dialog and has to wrap.
+                          Flexible(
+                            child: Text(
+                              'Secure OAuth · We never see your password',
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
                             ),
                           ),
                         ],
@@ -422,14 +432,17 @@ class _PerkGrid extends StatelessWidget {
         body: 'Scores & full watch history',
       ),
     ];
+    // Icon + title + two lines of body text; the cell is only ~100px wide on
+    // a 320px phone, so give it room for the reader's font size.
+    final perkExtent = 92 + (textScaleOf(context) - 1) * 70;
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         mainAxisSpacing: 8,
         crossAxisSpacing: 8,
-        mainAxisExtent: 92,
+        mainAxisExtent: perkExtent,
       ),
       itemCount: perks.length,
       itemBuilder: (context, index) {

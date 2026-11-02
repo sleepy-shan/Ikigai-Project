@@ -240,12 +240,19 @@ abstract final class AniListMapper {
                 (key, value) => MapEntry(key.toString(), value),
               ) ??
               const {};
+          final nodes = _asMap(map['media'])?['nodes'];
+          final firstMedia =
+              nodes is List && nodes.isNotEmpty ? _asMap(nodes.first) : null;
+          final mediaName = _asMap(firstMedia?['title']);
+          final english = (mediaName?['english'] as String?)?.trim() ?? '';
+          final romaji = (mediaName?['romaji'] as String?)?.trim() ?? '';
           return SearchCharacter(
             id: id,
             nameFull: full,
             nameNative: (name['native'] as String?)?.trim(),
             imageUrl: (image['large'] as String?)?.trim() ?? '',
             favourites: (map['favourites'] as num?)?.toInt() ?? 0,
+            mediaTitle: english.isNotEmpty ? english : romaji,
           );
         })
         .whereType<SearchCharacter>()
@@ -286,6 +293,9 @@ abstract final class AniListMapper {
             imageUrl: (image['large'] as String?)?.trim() ?? '',
             favourites: (map['favourites'] as num?)?.toInt() ?? 0,
             role: occupations.join(' · '),
+            credits:
+                _connectionTotal(map['staffMedia']) +
+                _connectionTotal(map['characterMedia']),
           );
         })
         .whereType<SearchStaff>()
@@ -308,18 +318,27 @@ abstract final class AniListMapper {
             name: name,
             favourites: (map['favourites'] as num?)?.toInt() ?? 0,
             isAnimationStudio: map['isAnimationStudio'] != false,
+            titleCount: _connectionTotal(map['media']),
           );
         })
         .whereType<SearchStudio>()
         .toList(growable: false);
   }
 
+  /// `pageInfo.total` of a GraphQL connection, or 0 when absent.
+  static int _connectionTotal(Object? connection) {
+    final info = _asMap(_asMap(connection)?['pageInfo']);
+    return (info?['total'] as num?)?.toInt() ?? 0;
+  }
+
   /// Reads `Page.pageInfo` for the people/studio search endpoints.
-  static ({int page, bool hasNextPage}) pageInfo(
+  static ({int page, bool hasNextPage, int? total}) pageInfo(
     Object? raw,
     int fallbackPage,
   ) {
-    if (raw is! Map) return (page: fallbackPage, hasNextPage: false);
+    if (raw is! Map) {
+      return (page: fallbackPage, hasNextPage: false, total: null);
+    }
     final info =
         (raw['pageInfo'] as Map?)?.map(
           (key, value) => MapEntry(key.toString(), value),
@@ -328,6 +347,7 @@ abstract final class AniListMapper {
     return (
       page: (info['currentPage'] as num?)?.toInt() ?? fallbackPage,
       hasNextPage: info['hasNextPage'] == true,
+      total: (info['total'] as num?)?.toInt(),
     );
   }
 
