@@ -52,11 +52,10 @@ class StateView<T> extends StatelessWidget {
       transitionBuilder: (inner, animation) => FadeTransition(
         opacity: animation,
         child: SlideTransition(
-          position:
-              Tween<Offset>(
-                begin: const Offset(0, 0.02),
-                end: Offset.zero,
-              ).animate(animation),
+          position: Tween<Offset>(
+            begin: const Offset(0, 0.02),
+            end: Offset.zero,
+          ).animate(animation),
           child: inner,
         ),
       ),
@@ -314,20 +313,18 @@ class LoadingRail extends StatelessWidget {
 }
 
 /// Skeleton for the home "Releasing today" strip. Mirrors the real episode
-/// card exactly: a [coverHeight] cover, an 8px gap, a one-line title and a
-/// one-line time row, at [itemWidth] with the rail's own padding and gap, so
-/// the real cards replace it without any layout shift.
+/// card: a stretchy cover, a 12px gap, a one-line title and a one-line time
+/// row, at [itemWidth] with the rail's own padding and gap, so the real cards
+/// replace it without any layout shift.
 class LoadingAiringRail extends StatelessWidget {
   const LoadingAiringRail({
     required this.height,
     required this.itemWidth,
-    required this.coverHeight,
     super.key,
   });
 
   final double height;
   final double itemWidth;
-  final double coverHeight;
 
   @override
   Widget build(BuildContext context) {
@@ -346,10 +343,9 @@ class LoadingAiringRail extends StatelessWidget {
             width: itemWidth,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
               children: [
-                SkeletonBone(height: coverHeight, radius: Tokens.radiusLg),
-                const SizedBox(height: Tokens.space8),
+                const Expanded(child: SkeletonBone(radius: Tokens.radiusLg)),
+                const SizedBox(height: Tokens.space12),
                 const SkeletonLine(height: 14),
                 const SizedBox(height: 6),
                 const SkeletonLine(fraction: 0.7, height: 10),

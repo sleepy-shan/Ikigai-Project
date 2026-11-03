@@ -40,6 +40,13 @@ abstract final class Tokens {
   /// the extent is always `card width + railGap`.
   static const double railGap = 16;
 
+  /// Width of every card in a home-page rail ("Releasing today", "Currently
+  /// airing", ...). Keep all rails on this so their cards line up.
+  static const double railCardWidth = 148;
+
+  /// Height of a home-page rail strip (poster + title + subtitle).
+  static const double railStripHeight = 252;
+
   /// Max content width for centered layouts on ultra-wide screens.
   static const double maxContentWidth = 1280;
 
@@ -127,12 +134,12 @@ abstract final class Tokens {
   }
 
   static List<BoxShadow> glowShadow(Color color) => [
-        BoxShadow(
-          color: color.withValues(alpha: 0.35),
-          blurRadius: 18,
-          offset: const Offset(0, 6),
-        ),
-      ];
+    BoxShadow(
+      color: color.withValues(alpha: 0.35),
+      blurRadius: 18,
+      offset: const Offset(0, 6),
+    ),
+  ];
 }
 
 /// Accent color choices offered in Settings.
@@ -155,7 +162,10 @@ enum AppAccent {
   final Color seed;
 
   /// Resolves a stored accent name, migrating pre-Ikigai values.
-  static AppAccent fromName(String? name, {AppAccent fallback = AppAccent.lagoon}) {
+  static AppAccent fromName(
+    String? name, {
+    AppAccent fallback = AppAccent.lagoon,
+  }) {
     if (name == null || name.isEmpty) return fallback;
     for (final accent in AppAccent.values) {
       if (accent.name == name) return accent;

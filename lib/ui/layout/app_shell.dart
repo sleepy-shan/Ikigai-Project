@@ -440,7 +440,7 @@ class _TopBar extends StatelessWidget {
                 icon: const Icon(Icons.notifications_none_outlined),
                 onPressed: () => context.go(Routes.notifications),
               ),
-              AccountButton(iconOnly: width < 1240, mobile: isCompact),
+              AccountButton(mobile: isCompact),
             ],
           ),
         ),
