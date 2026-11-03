@@ -834,9 +834,8 @@ class _AiringTodaySection extends ConsumerWidget {
             actionPath: '/calendar?tab=anime',
           ),
           LoadingAiringRail(
-            height: _airingStripHeight,
-            itemWidth: _airingCardWidth,
-            coverHeight: _airingCoverHeight,
+            height: Tokens.railStripHeight,
+            itemWidth: Tokens.railCardWidth,
           ),
         ],
       ),
@@ -856,13 +855,15 @@ class _AiringTodaySection extends ConsumerWidget {
               actionPath: Routes.calendarFor(MediaType.anime),
             ),
             ArrowRail(
-              height: _airingStripHeight,
+              height: Tokens.railStripHeight,
               itemCount: items.length,
               separatorWidth: Tokens.railGap,
-              itemExtent: _airingCardWidth + Tokens.railGap,
+              itemExtent: Tokens.railCardWidth + Tokens.railGap,
               itemBuilder: (context, index) => SizedBox(
-                width: _airingCardWidth,
-                child: _AiringTodayCard(item: items[index]),
+                width: Tokens.railCardWidth,
+                child: RepaintBoundary(
+                  child: _AiringTodayCard(item: items[index]),
+                ),
               ),
             ),
           ],
@@ -872,13 +873,11 @@ class _AiringTodaySection extends ConsumerWidget {
   }
 }
 
-const double _airingCardWidth = 124;
-const double _airingStripHeight = 212;
-
-/// Cover height inside [_AiringTodayCard]; the loading skeleton reuses it.
-const double _airingCoverHeight = 150;
-
-/// Compact episode card for the "Releasing today" strip.
+/// Episode card for the "Releasing today" strip.
+///
+/// Laid out exactly like [MediaRailCard] (same width, same stretchy poster,
+/// same title/subtitle rows, same radius, border and shadow) so every rail on
+/// the home page shows cards of identical size.
 class _AiringTodayCard extends StatelessWidget {
   const _AiringTodayCard({required this.item});
 
@@ -891,61 +890,72 @@ class _AiringTodayCard extends StatelessWidget {
     final time = Formatters.clockTime(
       DateTime.fromMillisecondsSinceEpoch(item.airingAt * 1000),
     );
+    final placeholder = ColoredBox(
+      color: theme.disabledColor.withValues(alpha: 0.12),
+    );
     return InkWell(
       borderRadius: BorderRadius.circular(Tokens.radiusLg),
       onTap: () => context.go(Routes.mediaDetail(item.mediaType, item.mediaId)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
         children: [
-          Stack(
-            children: [
-              ClipRRect(
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(Tokens.radiusLg),
-                child: item.coverUrl == null || item.coverUrl!.isEmpty
-                    ? Container(
-                        height: _airingCoverHeight,
-                        color: theme.disabledColor.withValues(alpha: 0.12),
-                      )
-                    : Image.network(
+                boxShadow: Tokens.cardShadow(theme.brightness),
+                border: Border.all(
+                  color: theme.brightness == Brightness.dark
+                      ? Colors.white.withValues(alpha: 0.09)
+                      : const Color(0xFFE3E4EC),
+                ),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(Tokens.radiusLg - 1),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (item.coverUrl == null || item.coverUrl!.isEmpty)
+                      placeholder
+                    else
+                      Image.network(
                         item.coverUrl!,
-                        height: _airingCoverHeight,
-                        width: _airingCardWidth,
                         fit: BoxFit.cover,
                         gaplessPlayback: true,
                         filterQuality: FilterQuality.low,
-                        errorBuilder: (context, error, stack) => Container(
-                          height: _airingCoverHeight,
-                          color: theme.disabledColor.withValues(alpha: 0.12),
+                        errorBuilder: (context, error, stack) => placeholder,
+                      ),
+                    Positioned(
+                      left: Tokens.space8,
+                      top: Tokens.space8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: Tokens.space8,
+                          vertical: Tokens.space4,
+                        ),
+                        decoration: BoxDecoration(
+                          gradient: Tokens.brandGradient,
+                          borderRadius: BorderRadius.circular(
+                            Tokens.radiusPill,
+                          ),
+                        ),
+                        child: Text(
+                          'EP ${item.episode}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.3,
+                          ),
                         ),
                       ),
-              ),
-              Positioned(
-                left: 6,
-                top: 6,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    gradient: Tokens.brandGradient,
-                    borderRadius: BorderRadius.circular(Tokens.radiusPill),
-                  ),
-                  child: Text(
-                    'EP ${item.episode}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.3,
                     ),
-                  ),
+                  ],
                 ),
               ),
-            ],
+            ),
           ),
-          const SizedBox(height: Tokens.space8),
+          const SizedBox(height: Tokens.space12),
           Text(
             item.title,
             maxLines: 1,
@@ -954,6 +964,7 @@ class _AiringTodayCard extends StatelessWidget {
               fontWeight: FontWeight.w700,
             ),
           ),
+          const SizedBox(height: Tokens.space2),
           Row(
             children: [
               Icon(
@@ -1021,7 +1032,7 @@ class _RailSection extends ConsumerWidget {
           actionPath: viewAllPath ?? Routes.browseRail(type, preset!),
         ),
         SizedBox(
-          height: 252,
+          height: Tokens.railStripHeight,
           child: async.when(
             loading: () => const LoadingRail(),
             error: (error, stack) => _RailError(

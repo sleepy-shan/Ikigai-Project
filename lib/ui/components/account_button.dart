@@ -11,26 +11,52 @@ import 'sign_in_dialog.dart';
 
 /// Top-bar account control.
 ///
-/// - **Desktop, guest:** a **Sign in** button (icon only on tighter bars).
+/// - **Desktop, guest:** a **Sign in [icon]** button (label, then icon).
 /// - **Desktop, signed in:** the AniList avatar; its menu has **Profile** and
 ///   **Sign out**. Settings and History live in the sidebar there.
-/// - **Mobile:** the avatar (or a person icon for guests). The menu has
+/// - **Mobile:** the avatar (or an icon-only button for guests). The menu has
 ///   **Settings**, **History** and **Sign out** (**Sign in** for guests),
 ///   because phones have no sidebar. The name header opens the profile.
 ///
 /// Keeping it here (rather than on the profile page) means sign in / sign out
 /// is reachable from every screen and there is a single source of truth.
-class AccountButton extends ConsumerWidget {
-  const AccountButton({this.iconOnly = false, this.mobile = false, super.key});
-
-  /// When true the desktop guest button collapses to an icon to save space.
-  final bool iconOnly;
+class AccountButton extends ConsumerStatefulWidget {
+  const AccountButton({this.mobile = false, super.key});
 
   /// Phone layout: the menu carries Settings and History.
   final bool mobile;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AccountButton> createState() => _AccountButtonState();
+}
+
+class _AccountButtonState extends ConsumerState<AccountButton> {
+  /// True while an account popup menu is showing. The popup is its own route
+  /// on the navigator, so it does not go away when this button rebuilds.
+  bool _menuOpen = false;
+
+  void _onMenuOpened() => _menuOpen = true;
+  void _onMenuClosed() => _menuOpen = false;
+
+  @override
+  void didUpdateWidget(covariant AccountButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Crossing the mobile/desktop breakpoint (e.g. resizing the browser)
+    // swaps this control for a different one. A popup opened from the old
+    // layout would be left floating over the new one, so close it.
+    if (oldWidget.mobile != widget.mobile && _menuOpen) {
+      _menuOpen = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final navigator = Navigator.of(context);
+        if (navigator.canPop()) navigator.pop();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mobile = widget.mobile;
     final auth = ref.watch(authStateProvider);
     final AuthUser? user = switch (auth) {
       AsyncData(:final value) => value,
@@ -53,31 +79,40 @@ class AccountButton extends ConsumerWidget {
           ),
         );
       }
-      if (mobile) return const _GuestMenu();
-      if (iconOnly) {
-        return IconButton(
-          tooltip: 'Sign in with AniList',
-          icon: const Icon(Icons.login_rounded),
-          onPressed: () => showSignInDialog(context),
-        );
+      if (mobile) {
+        return _GuestMenu(onOpened: _onMenuOpened, onClosed: _onMenuClosed);
       }
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: Tokens.space4),
-        child: FilledButton.icon(
+        child: FilledButton(
           onPressed: () => showSignInDialog(context),
-          icon: const Icon(Icons.login_rounded, size: 18),
-          label: const Text('Sign in'),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Sign in'),
+              SizedBox(width: Tokens.space8),
+              Icon(Icons.login_rounded, size: 18),
+            ],
+          ),
         ),
       );
     }
 
-    return _UserMenu(user: user, mobile: mobile);
+    return _UserMenu(
+      user: user,
+      mobile: mobile,
+      onOpened: _onMenuOpened,
+      onClosed: _onMenuClosed,
+    );
   }
 }
 
 /// Phone menu for guests: the same shortcuts, with Sign in at the end.
 class _GuestMenu extends StatelessWidget {
-  const _GuestMenu();
+  const _GuestMenu({required this.onOpened, required this.onClosed});
+
+  final VoidCallback onOpened;
+  final VoidCallback onClosed;
 
   @override
   Widget build(BuildContext context) {
@@ -85,7 +120,10 @@ class _GuestMenu extends StatelessWidget {
       tooltip: 'Account',
       icon: const Icon(Icons.account_circle_outlined),
       offset: const Offset(0, 46),
+      onOpened: onOpened,
+      onCanceled: onClosed,
       onSelected: (value) {
+        onClosed();
         switch (value) {
           case 'settings':
             showSettingsDialog(context);
@@ -120,17 +158,23 @@ PopupMenuItem<String> _menuRow(String value, IconData icon, String label) {
 }
 
 class _UserMenu extends ConsumerWidget {
-  const _UserMenu({required this.user, required this.mobile});
+  const _UserMenu({
+    required this.user,
+    required this.mobile,
+    required this.onOpened,
+    required this.onClosed,
+  });
 
   final AuthUser user;
   final bool mobile;
+  final VoidCallback onOpened;
+  final VoidCallback onClosed;
 
   Future<void> _signOut(BuildContext context, WidgetRef ref) async {
     await ref.read(authRepositoryProvider).signOut();
     if (context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Signed out')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Signed out')));
     }
   }
 
@@ -141,7 +185,10 @@ class _UserMenu extends ConsumerWidget {
     return PopupMenuButton<String>(
       tooltip: user.name,
       offset: const Offset(0, 46),
+      onOpened: onOpened,
+      onCanceled: onClosed,
       onSelected: (value) {
+        onClosed();
         switch (value) {
           case 'profile':
             context.go(Routes.profile);
